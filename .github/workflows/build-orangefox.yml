@@ -168,26 +168,56 @@ jobs:
 
       # ------------------------------------------------------------------
       # STEP 5: Battery fix (same fix as the TWRP build)
-      # TWRP/OrangeFox GetBatteryInfo() hardcodes capacity = 100 when the
-      # HIDL health HAL query fails, which pinned the status bar at 100%.
+      # The kernel fuel gauge on tanzanite reports a stuck 100 in
+      # /sys/class/power_supply/battery/capacity, and TWRP/OrangeFox read that
+      # node. battfixd.sh recomputes SOC from the honest bms voltage/current
+      # and writes it to /tmp/batt, which TW_CUSTOM_BATTERY_PATH points at.
       # ------------------------------------------------------------------
       - name: Patch device tree (battery fix)
         run: |
           set -e
           DT=fox/device/xiaomi/tanzanite
-          if grep -q '^TW_USE_LEGACY_BATTERY_SERVICES' "$DT/BoardConfig.mk"; then
-            echo "Already patched, skipping."
+
+          mkdir -p "$DT/recovery/root/system/bin" "$DT/recovery/root/system/etc"
+          cp battfix/battfixd.sh "$DT/recovery/root/system/bin/battfixd.sh"
+          cp battfix/ocv.txt     "$DT/recovery/root/system/etc/battfix_ocv.txt"
+          chmod 0755 "$DT/recovery/root/system/bin/battfixd.sh"
+          chmod 0644 "$DT/recovery/root/system/etc/battfix_ocv.txt"
+          sh -n "$DT/recovery/root/system/bin/battfixd.sh"
+          echo "battfixd.sh syntax: OK"
+
+          RC="$DT/recovery/root/init.recovery.mt6789.rc"
+          if grep -q 'service battfix' "$RC"; then
+            echo "init service already present."
           else
             {
               echo ''
-              echo '# --- battery fix: read sysfs directly, skip the HIDL health HAL ---'
-              echo '# GetBatteryInfo() hardcodes capacity = 100 when the health HAL'
-              echo '# query fails, which pins the status bar at 100% in recovery.'
+              echo '# battery gauge fix daemon (see battfix/battfixd.sh)'
+              echo 'on boot'
+              echo '    start battfix'
+              echo ''
+              echo 'service battfix /system/bin/sh /system/bin/battfixd.sh'
+              echo '    user root'
+              echo '    group root'
+              echo '    disabled'
+              echo '    seclabel u:r:recovery:s0'
+            } >> "$RC"
+          fi
+
+          if grep -q '^TW_CUSTOM_BATTERY_PATH' "$DT/BoardConfig.mk"; then
+            echo "battery path already set."
+          else
+            {
+              echo ''
+              echo '# --- battery fix: TWRP reads the SOC computed by battfixd.sh ---'
               echo 'TW_USE_LEGACY_BATTERY_SERVICES := true'
+              echo 'TW_CUSTOM_BATTERY_PATH := "/tmp/batt"'
             } >> "$DT/BoardConfig.mk"
           fi
+
           echo "=== verification ==="
-          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES' "$DT/BoardConfig.mk"
+          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH' "$DT/BoardConfig.mk"
+          tail -n 12 "$RC"
 
       # ------------------------------------------------------------------
       # STEP 6: Build

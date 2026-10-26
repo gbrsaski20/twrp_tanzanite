@@ -138,25 +138,55 @@ and skip the health HAL entirely.
 
 --- How to confirm you are running the fixed build ----------------------------
 
-1) Main TWRP screen: the version string must end with
-       A14_Tanzanite_battfix
-   If it still says A14_Tanzanite or A12+_AOSP, the OLD image is still flashed.
+1) Main TWRP screen: the version string must read
 
-2) In TWRP -> Advanced -> Terminal, or via adb shell, run:
+       3.7.1_12-A14_Tanzanite_battfix2
 
-   for d in /sys/class/power_supply/*; do
-     echo "== $d"
-     cat $d/capacity 2>/dev/null
-     cat $d/status   2>/dev/null
-     cat $d/voltage_now 2>/dev/null
-     cat $d/current_now 2>/dev/null
-   done
+   (variables.h concatenates TW_MAIN_VERSION_STR with TW_DEVICE_VERSION, so
+   the marker is the "-A14_Tanzanite_battfix2" suffix.)
 
-   Compare the "battery" capacity against the on-screen percentage:
-     - values match              -> fixed, done.
-     - battery is also 100       -> the kernel fuel gauge is wrong, not TWRP
-                                    (see troubleshooting below).
-     - battery path missing      -> TWRP shows "-1%", battery module not loaded.
+   Still showing A14_Tanzanite or A12+_AOSP  -> OLD image, reflash.
+   Showing -A14_Tanzanite_battfix (no "2")   -> first attempt, does NOT work.
+
+2) In TWRP -> Advanced -> Terminal, or via adb shell:
+
+   cat /tmp/batt/capacity      <- what TWRP is displaying
+   cat /tmp/batt/status        <- Charging / Discharging
+   tail -5 /tmp/battfix.log    <- the raw maths, one line per 5 s
+
+   A healthy log line looks like:
+     12 v=4150000 i=-500000 voc=4197 vs=4197 soc=87 disp=87 st=Discharging
+
+   Reading it:
+     v     terminal voltage, microvolts
+     i     current, microamps (negative = discharging)
+     voc   voltage after internal-resistance compensation, millivolts
+     soc   result of the OCV lookup
+     disp  what got written to /tmp/batt/capacity
+
+3) Compare with the node TWRP used to read:
+
+   cat /sys/class/power_supply/battery/capacity
+
+   This one will probably still say 100 - that is the point. The kernel gauge
+   is wrong; we no longer use it. What matters is /tmp/batt/capacity.
+
+--- Why the first attempt did not work ----------------------------------------
+
+Attempt 1 only added TW_USE_LEGACY_BATTERY_SERVICES, so TWRP read
+/sys/class/power_supply/battery/capacity directly. That fixed the health-HAL
+fallback, but the node itself is stuck at 100 because the vendor fuel
+algorithm has a wrong OCV table and an inverted current_now sign.
+
+Attempt 2 (this build) stops trusting that node. battfixd.sh runs as a recovery
+service, computes SOC in userspace from the honest bms voltage/current
+(OCV = V - I*R, R = 95 mOhm fitted on tanzanite hardware), and writes the result
+to /tmp/batt/capacity. TWRP is pointed there via TW_CUSTOM_BATTERY_PATH.
+
+If /tmp/batt/capacity is missing or TWRP shows -1%, the daemon did not start:
+
+   ps -A | grep battfix
+   sh /system/bin/battfixd.sh     <- run it by hand to see the error
 
 --- About "Android also jumps to 100% after visiting recovery" ----------------
 
@@ -246,16 +276,22 @@ Problem: Build fails with missing dependencies
   -> Run: export ALLOW_MISSING_DEPENDENCIES=true
   -> Retry: mka vendorbootimage
 
-Problem: battery still stuck at 100% after the battfix build
-  -> First confirm the version string shows A14_Tanzanite_battfix.
-  -> Run the sysfs dump from STEP 6. If /sys/class/power_supply/battery/capacity
-     is ALSO 100, the kernel fuel gauge is lying. This is a known tanzanite
-     problem (inverted current_now sign + wrong OCV table). Workaround is to
-     read the "bms" node instead:
-         TW_CUSTOM_BATTERY_PATH := "/sys/class/power_supply/bms"
-     (setting this implicitly enables TW_USE_LEGACY_BATTERY_SERVICES too).
-  -> If /sys/class/power_supply/battery does not exist, TWRP shows "-1%".
-     That means the battery kernel modules did not load - check dmesg.
+Problem: battery still stuck at 100% after the battfix2 build
+  -> Confirm the version string shows -A14_Tanzanite_battfix2 first.
+  -> Check whether the daemon is alive and what it computed:
+         ps -A | grep battfix
+         cat /tmp/batt/capacity
+         tail -20 /tmp/battfix.log
+  -> No log at all / file missing -> service did not start. Run it by hand:
+         sh /system/bin/battfixd.sh
+     and read the error. Typical causes: bms node missing (it falls back to
+     battery automatically) or voltage_now unreadable (permissions).
+  -> Log exists but soc is always 100 -> the OCV table is too optimistic for
+     your cell. Edit /system/etc/battfix_ocv.txt (copy it to /tmp first, the
+     daemon re-reads /tmp/battfix_ocv.txt) or lower RMO.
+  -> soc looks right but the screen still shows 100 -> TWRP is not picking up
+     the path. Verify TW_CUSTOM_BATTERY_PATH made it into the build:
+         strings /system/bin/twrp | grep tmp/batt
 
 Problem: Out of memory during build
   -> Reduce jobs: mka vendorbootimage -j4

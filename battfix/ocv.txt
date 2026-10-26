@@ -1,0 +1,32 @@
+# OCV (open-circuit voltage) -> SOC curve for tanzanite
+# Format: <millivolts> <percent>
+# Must be sorted descending. Lines starting with '#' and blank lines are ignored.
+#
+# Source: battfix-tanzanite v1.2 (etc/ocv.txt), the same module that already
+# works around this bug inside Android. Cell is 5500 mAh HV, ~4.40 V full.
+#
+# These are the author's initial estimates for this device. They can be
+# replaced with values measured on your own unit after two full cycles
+# (battfix ships tools/report.sh for that), which is what makes it accurate.
+4400 100
+4350 99
+4300 96
+4250 92
+4200 87
+4150 82
+4100 76
+4050 70
+4000 64
+3950 58
+3900 51
+3850 44
+3800 37
+3750 30
+3700 24
+3650 18
+3600 13
+3550 9
+3500 6
+3450 3
+3400 1
+3350 0

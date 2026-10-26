@@ -140,22 +140,22 @@ jobs:
       # ------------------------------------------------------------------
       # STEP 6.5: Patch device tree - FIX battery stuck at 100% in recovery
       # ------------------------------------------------------------------
-      # ROOT CAUSE (TWRP android-12.1, recovery_utils/battery_utils.cpp):
+      # ROOT CAUSE (two layers, both real):
       #
-      #   GetBatteryInfo() returns capacity = 100 whenever the HIDL health HAL
-      #   query fails:
-      #       if (res != Result::SUCCESS) { capacity = 100; }
+      # 1) TWRP's GetBatteryInfo() (recovery_utils/battery_utils.cpp) returns
+      #    capacity = 100 whenever the HIDL health HAL query fails:
+      #        if (res != Result::SUCCESS) { capacity = 100; }
       #
-      #   'res' stays Result::UNKNOWN when get_health_service() returns nullptr
-      #   (HAL not registered / died) or when the HAL answers with an error.
-      #   TWRP then displays a hardcoded 100% forever.
+      # 2) The kernel fuel gauge on tanzanite lies anyway. The vendor fuel
+      #    algorithm has a wrong OCV table and an inverted current_now sign, so
+      #    /sys/class/power_supply/battery/capacity itself sits at 100.
+      #    Reading sysfs directly (fix #1 alone) therefore is NOT enough.
       #
-      # FIX: define TW_USE_LEGACY_BATTERY_SERVICES. That flips twrp.cpp:426-456
-      # to read /sys/class/power_supply/battery/capacity directly and skip the
-      # health HAL completely. Wiring confirmed in the recovery repo Android.mk:
-      #       ifeq ($(TW_USE_LEGACY_BATTERY_SERVICES),true)
-      #           LOCAL_CFLAGS += -DTW_USE_LEGACY_BATTERY_SERVICES
-      #       endif
+      # FIX: ship battfixd.sh, a port of the battfix-tanzanite v1.2 algorithm,
+      # into the recovery ramdisk. It computes SOC in userspace from the honest
+      # bms voltage/current (OCV = V - I*R, R = 95 mOhm fitted on this device),
+      # writes it to /tmp/batt/capacity, and TWRP is pointed at that path with
+      # TW_CUSTOM_BATTERY_PATH (which also implies legacy battery services).
       # ------------------------------------------------------------------
       - name: Patch device tree (battery fix)
         run: |
@@ -166,26 +166,59 @@ jobs:
             exit 1
           fi
 
-          if grep -q '^TW_USE_LEGACY_BATTERY_SERVICES' "$DT/BoardConfig.mk"; then
-            echo "Already patched, skipping."
+          # --- 1. ship the SOC daemon + OCV curve into the ramdisk ----------
+          mkdir -p "$DT/recovery/root/system/bin" "$DT/recovery/root/system/etc"
+          cp battfix/battfixd.sh "$DT/recovery/root/system/bin/battfixd.sh"
+          cp battfix/ocv.txt     "$DT/recovery/root/system/etc/battfix_ocv.txt"
+          chmod 0755 "$DT/recovery/root/system/bin/battfixd.sh"
+          chmod 0644 "$DT/recovery/root/system/etc/battfix_ocv.txt"
+          sh -n "$DT/recovery/root/system/bin/battfixd.sh"
+          echo "battfixd.sh syntax: OK"
+          ls -l "$DT/recovery/root/system/bin/battfixd.sh" "$DT/recovery/root/system/etc/battfix_ocv.txt"
+
+          # --- 2. start it at boot -----------------------------------------
+          RC="$DT/recovery/root/init.recovery.mt6789.rc"
+          if grep -q 'service battfix' "$RC"; then
+            echo "init service already present."
           else
             {
               echo ''
-              echo '# --- battery fix: read sysfs directly, skip the HIDL health HAL ---'
-              echo '# TWRP GetBatteryInfo() hardcodes capacity = 100 when the health HAL'
-              echo '# query fails, which is what pins the status bar at 100% in recovery.'
+              echo '# battery gauge fix daemon (see battfix/battfixd.sh)'
+              echo 'on boot'
+              echo '    start battfix'
+              echo ''
+              echo 'service battfix /system/bin/sh /system/bin/battfixd.sh'
+              echo '    user root'
+              echo '    group root'
+              echo '    disabled'
+              echo '    seclabel u:r:recovery:s0'
+            } >> "$RC"
+          fi
+          echo "=== init rc tail ==="
+          tail -n 12 "$RC"
+
+          # --- 3. point TWRP at the tmpfs the daemon writes ----------------
+          if grep -q '^TW_CUSTOM_BATTERY_PATH' "$DT/BoardConfig.mk"; then
+            echo "battery path already set."
+          else
+            {
+              echo ''
+              echo '# --- battery fix: TWRP reads the SOC computed by battfixd.sh ---'
+              echo '# Setting TW_CUSTOM_BATTERY_PATH implicitly enables'
+              echo '# TW_USE_LEGACY_BATTERY_SERVICES (see Android.mk).'
               echo 'TW_USE_LEGACY_BATTERY_SERVICES := true'
+              echo 'TW_CUSTOM_BATTERY_PATH := "/tmp/batt"'
             } >> "$DT/BoardConfig.mk"
           fi
 
-          # Visible build marker so we can confirm the new image is flashed:
-          # TWRP shows this string in About / on the splash.
-          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := A14_Tanzanite_battfix/' "$DT/BoardConfig.mk"
+          # Visible build marker, so we can tell which image is flashed.
+          # variables.h concatenates: "3.7.1_12" TW_DEVICE_VERSION
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A14_Tanzanite_battfix2/' "$DT/BoardConfig.mk"
 
           echo "=== BoardConfig.mk tail ==="
-          tail -n 10 "$DT/BoardConfig.mk"
+          tail -n 12 "$DT/BoardConfig.mk"
           echo "=== verification ==="
-          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
+          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
 
       # ------------------------------------------------------------------
       # STEP 7: Setup build environment
