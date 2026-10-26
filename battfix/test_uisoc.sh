@@ -44,6 +44,43 @@ echo "=============================================================="
 echo " uisoc override test"
 echo "=============================================================="
 
+# ---------------------------------------------------------------------------
+# Inventory first, and it is read-only.
+#
+# A Motorola MT6768 build of this same driver was disassembled as a reference:
+# mt6358_battery.ko, description "MTK Gauge Device Driver", author MediaTek,
+# 714200 bytes. It carries the sections `.rela.data.battery_sysfs_field_tbl`
+# and `.rela.rodata.battery_sysfs_attr_group`, and its .rodata contains exactly
+# these 11 NUL-delimited attribute names - the same table, in the same order, as
+# battery_sysfs_field_tbl[] in the tanzanite source:
+#   temperature  coulomb_int_gap  uisoc_ht_int_gap  uisoc_lt_int_gap
+#   en_uisoc_ht_int  en_uisoc_lt_int  uisoc  disable  init_done  reset  log_level
+# It also has the symbols uisoc_set, disable_set, bat_sysfs_store, but NOT
+# uisoc_get - which independently confirms uisoc is write-only (mode 0200),
+# exactly as BAT_SYSFS_FIELD_WO declares.
+#
+# Our recovery loads mt6358_battery.ko too, so this device should show the same
+# set. If it does, the uisoc test below is meaningful. If it does not, the whole
+# attribute-group theory is wrong for this build and we stop here.
+# ---------------------------------------------------------------------------
+BATD=/sys/class/power_supply/battery
+
+echo
+echo "--- battery sysfs inventory ---"
+for a in uisoc temperature disable init_done reset log_level \
+	coulomb_int_gap uisoc_ht_int_gap uisoc_lt_int_gap \
+	en_uisoc_ht_int en_uisoc_lt_int; do
+	if [ -e "$BATD/$a" ]; then
+		printf '  %-18s %s\n' "$a" "$(ls -l "$BATD/$a" 2>/dev/null | cut -d' ' -f1)"
+	else
+		printf '  %-18s (absent)\n' "$a"
+	fi
+done
+echo "--- all entries in $BATD ---"
+ls -1 "$BATD" 2>/dev/null | tr '\n' ' '
+echo
+echo
+
 if [ ! -e "$U" ]; then
 	echo "RESULT: FAIL - $U does not exist"
 	echo "        the attribute group is not registered on this build."
