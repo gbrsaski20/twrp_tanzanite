@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <!-- OrangeFox / TWRP device tree for tanzanite.
+         The tree already ships OrangeFox support:
+           - fox_tanzanite.mk   (OF_* feature flags, inherited by device.mk)
+           - vendorsetup.sh     (FOX_* build vars, FOX_VENDOR_BOOT_RECOVERY=1)
+         So the same tree builds both TWRP and OrangeFox. -->
+    <project name="puuuuh/recovery_device_xiaomi_tanzanite" path="device/xiaomi/tanzanite" remote="github" revision="12.1_aosp" />
+
+    <!-- Prebuilt kernel (Image.gz, dtb, dtbo, kernel modules) -->
+    <project name="puuuuh/android_device_xiaomi_tanzanite-kernel" path="device/xiaomi/tanzanite-kernel" remote="github" revision="vanilla" />
+</manifest>

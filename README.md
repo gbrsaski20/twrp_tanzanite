@@ -94,8 +94,27 @@ fastboot reboot recovery
 ## Sources
 - Recovery tree: https://github.com/puuuuh/recovery_device_xiaomi_tanzanite (branch: 12.1_aosp)
 - Prebuilt kernel: https://github.com/puuuuh/android_device_xiaomi_tanzanite-kernel (branch: vanilla)
-- MTK sepolicy: https://github.com/puuuuh/android_device_mediatek_sepolicy_vndr (branch: main)
-- TWRP manifest: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp (branch: twrp-14)
+- TWRP manifest: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp (branch: **twrp-12.1**)
+- OrangeFox sync: https://gitlab.com/OrangeFox/sync (branch: master, `fox_12.1` = R12.0)
+
+> Catatan: `puuuuh/android_device_mediatek_sepolicy_vndr` **tidak dipakai** — repo itu
+> tidak punya branch `main`, dan recovery tree ini tidak pernah me-reference sepolicy.
+
+## OrangeFox (opsional)
+
+Device tree ini sudah punya `vendorsetup.sh` + `fox_tanzanite.mk`, jadi bisa
+langsung di-build jadi OrangeFox tanpa ubah apa-apa.
+
+- Workflow: `.github/workflows/build-orangefox.yml`
+- Branch: `fox_12.1` → OrangeFox **R12.0** (rilis stabil terbaru)
+- Manifest device tree: `orangefox/tanzanite.xml`
+
+Jalankan lewat **Actions → Build OrangeFox vendor_boot (tanzanite) → Run workflow**.
+Hasilnya `vendor_boot_orangefox_tanzanite.img`, flash dengan cara yang sama.
+
+Kenapa bukan `fox_14.1`: butuh ~85 GB disk (runner GitHub tidak cukup), dan
+tree ini memang berbasis `twrp-12.1`. OrangeFox sendiri menyarankan `fox_12.1`
+untuk ROM Android 12 ke atas.
 
 ## Features (confirmed working)
 ADB, Decryption, Display, Fastbootd, Flashing, MTP, Sideload, USB OTG, SD Card, Touch, Flashlight, Vibrator

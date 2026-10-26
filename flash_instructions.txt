@@ -165,6 +165,39 @@ Android reports. If Android shows 100% for a while after leaving recovery,
 that is the fuel gauge re-learning its state on the next boot; it settles by
 itself. It is not caused by the percentage TWRP displayed.
 
+--- Reset baterai: apa yang bisa dan tidak bisa dilakukan di TWRP -----------
+
+TWRP TIDAK punya tombol "reset fuel gauge". Yang ada cuma dua hal:
+
+1) Hapus statistik baterai Android (aman, efek terbatas)
+   Ini cuma menghapus catatan pemakaian Android, BUKAN kalibrasi gauge.
+   Persentase tetap datang dari kernel, jadi angkanya tidak berubah.
+
+   Di TWRP -> Advanced -> Terminal:
+       rm -f /data/system/batterystats.bin
+
+   Syarat: /data harus sudah terdekripsi (TWRP tidak minta password).
+   Kalau muncul "Read-only file system", berarti /data belum ke-mount.
+   File ini dibuat ulang otomatis oleh Android saat boot berikutnya.
+
+2) Kalibrasi gauge yang sebenarnya (tidak lewat TWRP)
+   Ini yang benar-benar memperbaiki pembacaan yang melenceng:
+       a. Charge sampai 100%, lalu tetap tercolok 1-2 jam lagi
+          (supaya gauge melihat "plato" tegangan penuh)
+       b. Pakai normal sampai HP mati sendiri
+       c. Charge tanpa putus sampai 100% dalam keadaan mati
+       d. Nyalakan, selesai. Gauge belajar ulang.
+
+   Di Android bisa juga lewat MTK EngineerMode:
+       *#*#3646633#*#*  ->  Hardware Testing -> Power -> Fuel Gauge
+   (di HyperOS kadang diblokir; kalau begitu pakai cara a-d di atas)
+
+*** JANGAN HAPUS /mnt/vendor/persist ***
+Di situ MTK menyimpan kalibrasi baterai (tabel OCV, battery ID, cycle count).
+Kalau dihapus, gauge bisa jadi permanen salah dan harus recalibrate pabrik.
+Tidak ada hubungannya dengan bug 100% yang kita perbaiki - itu murni bug
+tampilan TWRP, gauge-nya sendiri tidak pernah rusak.
+
 ==============================================================================
   ALTERNATIVE: TEMPORARY BOOT (WITHOUT FLASHING)
 ==============================================================================

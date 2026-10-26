@@ -1,0 +1,286 @@
+# =============================================================================
+# GitHub Actions Workflow: Build OrangeFox Recovery for tanzanite
+# Device:  Xiaomi Redmi Note 14 4G (tanzanite)
+# Chipset: MediaTek Helio G99 Ultra (MT6789)
+# Output:  vendor_boot.img  (OrangeFox R12.0, fox_12.1 branch)
+#
+# WHY fox_12.1 AND NOT fox_14.1:
+#   - The device tree is branch 12.1_aosp and is built on twrp-12.1.
+#   - OrangeFox docs say to use fox_12.1 for Android 12+ ROMs, and only use
+#     fox_14.1 when the device genuinely needs a 14.x build system.
+#   - fox_14.1 needs ~85GB of disk; GitHub runners do not have that.
+#   - fox_12.1 needs ~45GB, which fits after the free-disk-space step.
+#
+# HOW TO USE:
+#   Actions tab -> "Build OrangeFox vendor_boot (tanzanite)" -> Run workflow
+#
+# The device tree is OrangeFox-ready out of the box:
+#   - fox_tanzanite.mk : OF_* feature flags (inherited by device.mk)
+#   - vendorsetup.sh   : FOX_* build vars, FOX_VENDOR_BOOT_RECOVERY=1
+# so we lunch the same twrp_tanzanite product, exactly as the tree README says.
+# =============================================================================
+
+name: Build OrangeFox vendor_boot (tanzanite)
+
+on:
+  workflow_dispatch:
+    inputs:
+      fox_branch:
+        description: 'OrangeFox manifest branch (12.1 = R12.0, recommended)'
+        required: true
+        default: '12.1'
+        type: choice
+        options:
+          - '12.1'
+          - '14.1'
+
+env:
+  FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
+  DEVICE: "tanzanite"
+  FOX_BUILD_DEVICE: "tanzanite"
+
+jobs:
+  build:
+    name: Build OrangeFox vendor_boot.img
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      # ------------------------------------------------------------------
+      # STEP 0: Free disk space
+      # fox_12.1 needs ~45GB of source + ~10GB of out/. The runner starts
+      # with ~55GB, so we must reclaim space first.
+      # ------------------------------------------------------------------
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Show disk space before sync
+        run: |
+          echo "=== Disk space ==="
+          df -h /
+          echo ""
+          echo "=== CPU / RAM ==="
+          nproc
+          free -h
+
+      - name: Checkout build config
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # STEP 1: Build dependencies
+      # ------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git gnupg flex bison gperf build-essential zip curl \
+            zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses-dev libncurses5 libtinfo5 lib32z1-dev \
+            libssl-dev libelf1 libstdc++6 libxml2-utils xsltproc \
+            unzip rsync python3 python3-pip ccache jq bc bsdmainutils \
+            cpio imagemagick lz4 openjdk-17-jdk python-is-python3 \
+            libncurses-dev libreadline-dev libgl1-mesa-dev libwayland-dev
+
+      # ------------------------------------------------------------------
+      # STEP 2: Install repo tool
+      # GITHUB_PATH only affects SUBSEQUENT steps, which is why this is
+      # its own step and the sync happens later.
+      # ------------------------------------------------------------------
+      - name: Install repo tool
+        run: |
+          mkdir -p ${HOME}/bin
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o ${HOME}/bin/repo
+          chmod +x ${HOME}/bin/repo
+          echo "${HOME}/bin" >> ${GITHUB_PATH}
+
+      # ------------------------------------------------------------------
+      # STEP 3: Sync OrangeFox sources
+      # orangefox_sync.sh does the whole job: repo init on the TWRP minimal
+      # manifest, repo sync, then clones/patches the OrangeFox projects
+      # (bootable/recovery, vendor/recovery, vendor/twrp patch, ...).
+      # --path must be ABSOLUTE.
+      # ------------------------------------------------------------------
+      - name: Sync OrangeFox sources
+        run: |
+          set -e
+          git clone --depth=1 https://gitlab.com/OrangeFox/sync.git ofsync
+          # The script resolves its patch files from $PWD/patches, so it MUST
+          # be executed from inside the sync repo, not from the workspace root.
+          cd ofsync
+          SCRIPT=$(find . -maxdepth 2 -name orangefox_sync.sh | head -1)
+          if [ -z "$SCRIPT" ]; then
+            echo "ERROR: orangefox_sync.sh not found in the sync repo"
+            find . -maxdepth 2 -type f | head -40
+            exit 1
+          fi
+          echo "Using sync script: $SCRIPT"
+          head -12 "$SCRIPT"
+          ls -d patches || { echo "ERROR: patches/ dir missing"; exit 1; }
+          chmod +x "$SCRIPT"
+          bash "$SCRIPT" --branch "${FOX_SYNC_BRANCH}" --path "${GITHUB_WORKSPACE}/fox"
+
+      - name: Show synced tree
+        run: |
+          echo "=== top level ==="
+          ls -1 fox | head -40
+          echo "=== OrangeFox check ==="
+          test -d fox/vendor/recovery && echo "vendor/recovery: OK" || echo "vendor/recovery: MISSING"
+          test -f fox/vendor/twrp/config/common.mk && echo "vendor/twrp/config/common.mk: OK" || echo "vendor/twrp: MISSING"
+          echo "=== disk ==="
+          df -h /
+
+      # ------------------------------------------------------------------
+      # STEP 4: Add the device tree
+      # The OrangeFox script syncs its own manifest, so our device tree is
+      # added afterwards via a local manifest + a second (cheap) repo sync.
+      # ------------------------------------------------------------------
+      - name: Add device tree (local manifest)
+        run: |
+          set -e
+          mkdir -p fox/.repo/local_manifests
+          cp orangefox/tanzanite.xml fox/.repo/local_manifests/tanzanite.xml
+          cat fox/.repo/local_manifests/tanzanite.xml
+          cd fox
+          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+      - name: Verify device tree
+        run: |
+          set -e
+          DT=fox/device/xiaomi/tanzanite
+          test -f "$DT/BoardConfig.mk" || { echo "ERROR: device tree missing"; exit 1; }
+          test -f "$DT/vendorsetup.sh" || { echo "ERROR: vendorsetup.sh missing"; exit 1; }
+          test -f "$DT/fox_tanzanite.mk" || { echo "ERROR: fox_tanzanite.mk missing"; exit 1; }
+          echo "device tree: OK"
+          echo "kernel modules bundled: $(ls -1 "$DT"/recovery/root/lib/modules/*.ko 2>/dev/null | wc -l)"
+
+      # ------------------------------------------------------------------
+      # STEP 5: Battery fix (same fix as the TWRP build)
+      # TWRP/OrangeFox GetBatteryInfo() hardcodes capacity = 100 when the
+      # HIDL health HAL query fails, which pinned the status bar at 100%.
+      # ------------------------------------------------------------------
+      - name: Patch device tree (battery fix)
+        run: |
+          set -e
+          DT=fox/device/xiaomi/tanzanite
+          if grep -q '^TW_USE_LEGACY_BATTERY_SERVICES' "$DT/BoardConfig.mk"; then
+            echo "Already patched, skipping."
+          else
+            {
+              echo ''
+              echo '# --- battery fix: read sysfs directly, skip the HIDL health HAL ---'
+              echo '# GetBatteryInfo() hardcodes capacity = 100 when the health HAL'
+              echo '# query fails, which pins the status bar at 100% in recovery.'
+              echo 'TW_USE_LEGACY_BATTERY_SERVICES := true'
+            } >> "$DT/BoardConfig.mk"
+          fi
+          echo "=== verification ==="
+          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES' "$DT/BoardConfig.mk"
+
+      # ------------------------------------------------------------------
+      # STEP 6: Build
+      # The tree README documents this exact command for OrangeFox/SHRP:
+      #   lunch twrp_tanzanite-eng && mka adbd vendorbootimage
+      # adbd must be listed explicitly for OrangeFox builds.
+      # ------------------------------------------------------------------
+      - name: Build OrangeFox
+        run: |
+          cd fox
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export ALLOW_MISSING_DEPENDENCIES_ON_RECOVERY=true
+          export LC_ALL="C.UTF-8"
+          export FOX_BUILD_DEVICE="${DEVICE}"
+          export USE_CCACHE=1
+          export CCACHE_EXEC=/usr/bin/ccache
+          ccache -M 3G || true
+          source build/envsetup.sh
+          lunch twrp_${DEVICE}-eng
+          mka adbd vendorbootimage -j$(nproc --all) | tee /tmp/fox_build.log
+
+      # ------------------------------------------------------------------
+      # STEP 7: Collect output
+      # For vendor_boot devices the fastboot-flashable file is
+      # vendor_boot.img. OrangeFox may also drop an
+      # OrangeFox-unofficial-<device>.img in the product out dir; we grab
+      # both so nothing is lost.
+      # ------------------------------------------------------------------
+      - name: Locate output image
+        id: locate
+        run: |
+          set -e
+          OUT=fox/out/target/product/${DEVICE}
+          echo "=== images in $OUT ==="
+          find "$OUT" -maxdepth 1 -name '*.img' -type f -printf '%s\t%p\n' 2>/dev/null | sort -rn | head -20
+
+          VB=$(find "$OUT" -maxdepth 1 -name 'vendor_boot.img' -type f 2>/dev/null | head -1)
+          OF=$(find "$OUT" -maxdepth 1 -name 'OrangeFox*.img' -type f 2>/dev/null | head -1)
+
+          if [ -n "$VB" ]; then
+            cp "$VB" vendor_boot_orangefox_tanzanite.img
+            echo "vendor_boot.img -> vendor_boot_orangefox_tanzanite.img ($(stat -c%s vendor_boot_orangefox_tanzanite.img) bytes)"
+          fi
+          if [ -n "$OF" ]; then
+            cp "$OF" "$(basename "$OF")"
+            echo "OrangeFox image -> $(basename "$OF") ($(stat -c%s "$(basename "$OF")") bytes)"
+          fi
+
+          if [ -z "$VB" ] && [ -z "$OF" ]; then
+            echo "ERROR: no recovery image produced"
+            tail -60 /tmp/fox_build.log || true
+            exit 1
+          fi
+
+          # header sanity check
+          if [ -f vendor_boot_orangefox_tanzanite.img ]; then
+            echo "=== header (must be VNDRBOOT) ==="
+            head -c 16 vendor_boot_orangefox_tanzanite.img; echo
+          fi
+
+      - name: Upload OrangeFox image
+        uses: actions/upload-artifact@v4
+        with:
+          name: orangefox_tanzanite
+          path: |
+            vendor_boot_orangefox_tanzanite.img
+            OrangeFox*.img
+          retention-days: 30
+          compression-level: 0
+
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: orangefox-tanzanite-${{ github.run_number }}
+          name: OrangeFox tanzanite Build #${{ github.run_number }}
+          body: |
+            ## OrangeFox Recovery for Xiaomi Redmi Note 14 4G (tanzanite)
+
+            **Device:** Xiaomi Redmi Note 14 4G
+            **Codename:** tanzanite
+            **Chipset:** MediaTek Helio G99 Ultra (MT6789)
+            **OrangeFox base:** R12.0 (fox_${{ github.event.inputs.fox_branch }} branch)
+            **Recovery type:** vendor_boot (V4 header)
+
+            ### Flash instructions:
+            ```
+            fastboot flash vendor_boot vendor_boot_orangefox_tanzanite.img
+            fastboot reboot recovery
+            ```
+
+            ### Notes:
+            - Battery fix included: `TW_USE_LEGACY_BATTERY_SERVICES := true`
+            - Rollback to stock: flash the original vendor_boot.img
+          files: |
+            vendor_boot_orangefox_tanzanite.img
+            OrangeFox*.img
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
