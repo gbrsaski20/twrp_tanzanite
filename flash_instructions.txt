@@ -1,0 +1,168 @@
+==============================================================================
+  FLASH INSTRUCTIONS — TWRP for Redmi Note 14 4G (tanzanite)
+  Recovery partition: vendor_boot
+==============================================================================
+
+DEVICE INFO
+----------
+  Device:        Xiaomi Redmi Note 14 4G
+  Codename:      tanzanite
+  Chipset:       MediaTek Helio G99 Ultra (MT6789)
+  Android:       14 (HyperOS)
+  Recovery type: vendor_boot image (V4 header)
+  Bootloader:    Must be unlocked (Mi Unlock)
+
+==============================================================================
+  STEP 1: PREPARE YOUR DEVICE
+==============================================================================
+
+1. Unlock the bootloader (if not already done):
+   - Download Mi Unlock Tool from https://www.miui.com/unlock/
+   - Bind your Mi Account in Developer Options
+   - Wait 168 hours (7 days) for the unlock timer
+   - Boot to fastboot: power off -> hold Vol Down + Power
+   - Run Mi Unlock and unlock
+
+2. Enable USB Debugging:
+   - Settings -> About phone -> tap "MIUI version" 7 times
+   - Settings -> Additional settings -> Developer options
+   - Enable "USB debugging"
+
+3. Install minimal ADB & Fastboot on your PC:
+   - Already have it at: F:\Tool RedmiNote14\Minimal ADB Fastboot v1.4.3.exe
+   - Or download from: https://developer.android.com/studio/releases/platform-tools
+
+==============================================================================
+  STEP 2: BOOT TO FASTBOOT MODE
+==============================================================================
+
+Option A (from running system):
+   adb reboot bootloader
+
+Option B (from powered off state):
+   - Power off the phone completely
+   - Hold Volume Down + Power button together
+   - Release when you see the fastboot bunny/rabbit logo
+
+Verify connection:
+   fastboot devices
+   # Should show something like: 12345678  fastboot
+
+==============================================================================
+  STEP 3: FLASH TWRP RECOVERY TO vendor_boot
+==============================================================================
+
+*** IMPORTANT ***
+The Redmi Note 14 4G stores recovery inside the vendor_boot partition.
+Do NOT flash to "boot" or "recovery" partition — only to vendor_boot!
+
+After building (on your Linux/WSL2 machine), the output image is at:
+   ~/twrp-build/out/target/product/tanzanite/vendor_boot.img
+
+Copy it to your Windows machine, or if building in WSL2, access it at:
+   \\wsl$\Ubuntu-22.04\home\<username>\twrp-build\out\target\product\tanzanite\vendor_boot.img
+
+Flash command:
+   fastboot flash vendor_boot vendor_boot.img
+
+Example (if the image is in F:\Tool RedmiNote14\):
+   fastboot flash vendor_boot "F:\Tool RedmiNote14\twrp_vendor_boot.img"
+
+==============================================================================
+  STEP 4: BOOT TO TWRP RECOVERY
+==============================================================================
+
+After flashing, boot directly to recovery (do NOT boot to system first!):
+
+   fastboot reboot recovery
+
+Or manually:
+   - Hold Volume Up + Power button
+   - Release when you see the TWRP logo
+
+*** CRITICAL ***
+On first boot to TWRP, if it asks to "Keep system read only" or
+"Allow modifications", choose ALLOW MODIFICATIONS if you want to be
+able to modify system partitions.
+
+If TWRP doesn't stick after reboot (system overwrites it):
+   1. Flash TWRP again:  fastboot flash vendor_boot vendor_boot.img
+   2. Immediately:       fastboot reboot recovery
+   3. In TWRP: Install any custom ROM zip, or flash Magisk to patch the ROM
+   4. After that, TWRP should persist
+
+==============================================================================
+  STEP 5: BACKUP YOUR STOCK PARTITIONS (RECOMMENDED)
+==============================================================================
+
+Once in TWRP:
+   1. Go to Backup
+   2. Select: System, Vendor, Boot, Data, Vendor_Boot
+   3. Backup to internal storage or SD card or USB OTG
+   4. Copy backup to PC for safekeeping
+
+==============================================================================
+  ALTERNATIVE: TEMPORARY BOOT (WITHOUT FLASHING)
+==============================================================================
+
+If you want to test TWRP before flashing permanently:
+
+   fastboot boot vendor_boot.img
+
+This boots TWRP temporarily without writing to the partition.
+TWRP will disappear on next reboot to system.
+
+==============================================================================
+  REFERENCE: YOUR EXISTING AOSP RECOVERY
+==============================================================================
+
+You have an existing AOSP (LineageOS) recovery at:
+   F:\Tool RedmiNote14\Rom + recovery\vendor_boot los.img
+
+This is a vendor_boot V4 image (confirmed from header: "VNDRBOOT" magic,
+version 4, cmdline "bootopt=64S3,32N2,64N2").
+
+If TWRP doesn't work for some reason, you can always flash back this AOSP
+recovery:
+   fastboot flash vendor_boot "F:\Tool RedmiNote14\Rom + recovery\vendor_boot los.img"
+   fastboot reboot recovery
+
+==============================================================================
+  TROUBLESHOOTING
+==============================================================================
+
+Problem: "fastboot: error: device not found"
+  -> Install USB drivers ( MediaTek Preloader USB VCOM Drivers in your tools)
+  -> Try different USB cable (preferably original)
+  -> Try different USB port (USB 2.0 preferred over hub)
+
+Problem: TWRP boots but touch doesn't work
+  -> The recovery tree includes touchscreen kernel modules
+     (modules.load.recovery in the kernel tree). If touch fails, the
+     modules might not have loaded. Check dmesg in TWRP.
+
+Problem: TWRP boots but decryption fails
+  -> The tree uses FBE (File-Based Encryption) with aes-256-xts.
+     If you changed your PIN/password recently, reboot to system and back.
+
+Problem: Build fails with missing dependencies
+  -> Run: export ALLOW_MISSING_DEPENDENCIES=true
+  -> Retry: mka vendorbootimage
+
+Problem: Out of memory during build
+  -> Reduce jobs: mka vendorbootimage -j4
+  -> Add swap: sudo fallocate -l 16G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+
+==============================================================================
+  SOURCE CREDITS
+==============================================================================
+
+TWRP Recovery tree:    https://github.com/puuuuh/recovery_device_xiaomi_tanzanite
+Prebuilt kernel:       https://github.com/puuuuh/android_device_xiaomi_tanzanite-kernel
+Original device tree:  https://github.com/nathanzerogarage/android_device_xiaomi_tanzanite
+TWRP manifest:         https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp
+TWRP project:          https://github.com/TeamWin/android_bootable_recovery
+
+Features confirmed working in this tree:
+  - ADB, Decryption, Display, Fastbootd, Flashing
+  - MTP, Sideload, USB OTG, SD Card, Touch, Flashlight, Vibrator

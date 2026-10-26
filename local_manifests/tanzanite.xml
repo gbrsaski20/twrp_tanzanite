@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <!-- TWRP Recovery device tree for tanzanite -->
+    <project name="puuuuh/recovery_device_xiaomi_tanzanite" path="device/xiaomi/tanzanite" remote="github" revision="12.1_aosp" />
+
+    <!-- Prebuilt kernel (Image.gz, dtb, dtbo, kernel modules) -->
+    <project name="puuuuh/android_device_xiaomi_tanzanite-kernel" path="device/xiaomi/tanzanite-kernel" remote="github" revision="vanilla" />
+
+    <!-- NOTE: MTK sepolicy_vndr removed - the recovery tree does not reference it
+         (device.mk / BoardConfig.mk / Android.mk have no sepolicy reference).
+         The puuuuh sepolicy repo also has no 'main' branch, only lineage-23.2. -->
+</manifest>

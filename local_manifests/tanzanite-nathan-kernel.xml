@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+    <!-- TWRP Recovery device tree for tanzanite (puuuuh - only TWRP recovery tree available) -->
+    <project name="puuuuh/recovery_device_xiaomi_tanzanite" path="device/xiaomi/tanzanite" remote="github" revision="12.1_aosp" />
+
+    <!-- Prebuilt kernel from NATHANZEROGARAGE (newer, Oct 2026) -->
+    <!-- Structure is identical to puuuuh's kernel, drop-in compatible -->
+    <project name="nathanzerogarage/android_device_xiaomi_tanzanite-kernel" path="device/xiaomi/tanzanite-kernel" remote="github" revision="vanilla" />
+</manifest>

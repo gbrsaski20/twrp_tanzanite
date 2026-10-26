@@ -1,0 +1,221 @@
+# =============================================================================
+# GitHub Actions Workflow: Build TWRP vendor_boot.img for tanzanite
+# Device:  Xiaomi Redmi Note 14 4G (tanzanite)
+# Chipset: MediaTek Helio G99 Ultra (MT6789)
+# Output:  vendor_boot.img (V4 header)
+#
+# HOW TO USE:
+#   1. Create a new GitHub repo (e.g. your-username/twrp-tanzanite-build)
+#   2. Push this entire twrp_tanzanite/ folder as the repo root
+#   3. Go to Actions tab -> "Build TWRP vendor_boot (tanzanite)" -> Run workflow
+#   4. Wait ~2-3 hours for the build to finish
+#   5. Download the vendor_boot.img artifact from the run page
+#   6. Flash to your phone: fastboot flash vendor_boot vendor_boot.img
+#
+# NOTE: GitHub Actions free tier gives 2000 min/month (~33 hours).
+#       This build takes about 90-150 minutes per run.
+# =============================================================================
+
+name: Build TWRP vendor_boot (tanzanite)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '.github/workflows/build.yml'
+      - 'local_manifests/**'
+
+env:
+  TWRP_BRANCH: "twrp-12.1"
+  MANIFEST_URL: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
+  DEVICE: "tanzanite"
+  TW_DEVICE_VERSION: "A14_Tanzanite"
+
+jobs:
+  build:
+    name: Build vendor_boot.img
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      # ------------------------------------------------------------------
+      # STEP 0: Free disk space
+      # GitHub's ubuntu-22.04 runner has ~55GB free, but an AOSP/TWRP build
+      # needs ~60GB. This removes preinstalled toolchains we don't use
+      # (Android SDK, .NET, Haskell, GHC, large packages) to reclaim ~30GB.
+      # ------------------------------------------------------------------
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: false
+          swap-storage: false
+
+      - name: Show disk space before build
+        run: |
+          echo "=== Disk space ==="
+          df -h /
+          echo ""
+          echo "=== CPU / RAM ==="
+          nproc
+          free -h
+
+      # ------------------------------------------------------------------
+      # STEP 1: Checkout this repo (contains local_manifests/)
+      # ------------------------------------------------------------------
+      - name: Checkout build config
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # STEP 2: Install build dependencies
+      # ------------------------------------------------------------------
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git gnupg flex bison gperf build-essential zip curl \
+            zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses-dev libncurses5 libtinfo5 lib32z1-dev \
+            libssl-dev libelf1 libstdc++6 libxml2-utils xsltproc \
+            unzip rsync python3 python3-pip ccache jq bc bsdmainutils \
+            cpio imagemagick lz4 openjdk-17-jdk python-is-python3 \
+            libncurses-dev libreadline-dev libgl1-mesa-dev libwayland-dev
+
+      # ------------------------------------------------------------------
+      # STEP 3: Install repo tool
+      # ------------------------------------------------------------------
+      - name: Install repo tool
+        run: |
+          mkdir -p ${HOME}/bin
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo -o ${HOME}/bin/repo
+          chmod +x ${HOME}/bin/repo
+          echo "${HOME}/bin" >> ${GITHUB_PATH}
+
+      # ------------------------------------------------------------------
+      # STEP 4: Initialize TWRP source tree (shallow clone)
+      # ------------------------------------------------------------------
+      - name: Initialize TWRP manifest
+        run: |
+          mkdir -p twrp-build
+          cd twrp-build
+          repo init --depth=1 \
+            -u "${MANIFEST_URL}" \
+            -b "${TWRP_BRANCH}" \
+            -g default,-mips,-darwin,-notdefault
+
+      # ------------------------------------------------------------------
+      # STEP 5: Add local manifest for tanzanite
+      # ------------------------------------------------------------------
+      - name: Add local manifest
+        run: |
+          mkdir -p twrp-build/.repo/local_manifests
+          cp -v local_manifests/tanzanite.xml twrp-build/.repo/local_manifests/tanzanite.xml
+          cat twrp-build/.repo/local_manifests/tanzanite.xml
+
+      # ------------------------------------------------------------------
+      # STEP 6: Sync source code (~29GB)
+      # ------------------------------------------------------------------
+      - name: Sync source code
+        run: |
+          cd twrp-build
+          repo sync -c \
+            -j$(nproc --all) \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags \
+            --optimized-fetch \
+            --prune
+
+      # ------------------------------------------------------------------
+      # STEP 7: Setup build environment
+      # ------------------------------------------------------------------
+      - name: Setup build environment
+        run: |
+          cd twrp-build
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export ALLOW_MISSING_DEPENDENCIES_ON_RECOVERY=true
+          export TW_DEVICE_VERSION="${TW_DEVICE_VERSION}"
+          export LC_ALL="C.UTF-8"
+
+      # ------------------------------------------------------------------
+      # STEP 8: Build vendor_boot image
+      # ------------------------------------------------------------------
+      - name: Build vendor_boot image
+        run: |
+          cd twrp-build
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export ALLOW_MISSING_DEPENDENCIES_ON_RECOVERY=true
+          export TW_DEVICE_VERSION="${TW_DEVICE_VERSION}"
+          export LC_ALL="C.UTF-8"
+          source build/envsetup.sh
+          lunch twrp_${DEVICE}-eng
+          mka vendorbootimage -j$(nproc --all)
+
+      # ------------------------------------------------------------------
+      # STEP 9: Locate and verify output
+      # ------------------------------------------------------------------
+      - name: Locate output image
+        id: locate
+        run: |
+          cd twrp-build
+          OUTPUT_IMG=$(find out -name "vendor_boot.img" -type f 2>/dev/null | head -1)
+          if [ -z "${OUTPUT_IMG}" ]; then
+            echo "ERROR: vendor_boot.img not found!"
+            find out -name "*.img" -type f 2>/dev/null
+            exit 1
+          fi
+          echo "Found: ${OUTPUT_IMG}"
+          echo "Size: $(ls -lh "${OUTPUT_IMG}" | awk '{print $5}')"
+          # Copy to a clean filename
+          cp "${OUTPUT_IMG}" ../vendor_boot_twrp_tanzanite.img
+          echo "output_path=../vendor_boot_twrp_tanzanite.img" >> ${GITHUB_OUTPUT}
+
+      # ------------------------------------------------------------------
+      # STEP 10: Upload artifact
+      # ------------------------------------------------------------------
+      - name: Upload vendor_boot.img
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor_boot_twrp_tanzanite
+          path: vendor_boot_twrp_tanzanite.img
+          retention-days: 30
+          compression-level: 0
+
+      # ------------------------------------------------------------------
+      # STEP 11: Create release (optional, only on manual dispatch)
+      # ------------------------------------------------------------------
+      - name: Create release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: twrp-tanzanite-${{ github.run_number }}
+          name: TWRP tanzanite Build #${{ github.run_number }}
+          body: |
+            ## TWRP vendor_boot.img for Xiaomi Redmi Note 14 4G (tanzanite)
+
+            **Device:** Xiaomi Redmi Note 14 4G
+            **Codename:** tanzanite
+            **Chipset:** MediaTek Helio G99 Ultra (MT6789)
+            **Recovery type:** vendor_boot (V4 header)
+            **Build date:** ${{ github.event.head_commit.timestamp || github.run_started_at }}
+
+            ### Flash instructions:
+            ```
+            fastboot flash vendor_boot vendor_boot_twrp_tanzanite.img
+            fastboot reboot recovery
+            ```
+
+            ### Features:
+            - ADB, Decryption, Display, Fastbootd, Flashing
+            - MTP, Sideload, USB OTG, SD Card, Touch, Flashlight, Vibrator
+          files: |
+            vendor_boot_twrp_tanzanite.img
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
