@@ -39,6 +39,11 @@ env:
   DEVICE: "tanzanite"
   FOX_BUILD_DEVICE: "tanzanite"
 
+# GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
+# softprops/action-gh-release needs contents: write, otherwise 403.
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build OrangeFox vendor_boot.img
@@ -255,7 +260,10 @@ jobs:
 
       - name: Create release
         if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v1
+        # The image artifact is the real deliverable; never fail the build
+        # over a release permission problem.
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: orangefox-tanzanite-${{ github.run_number }}
           name: OrangeFox tanzanite Build #${{ github.run_number }}

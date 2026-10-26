@@ -26,6 +26,12 @@ on:
       - '.github/workflows/build.yml'
       - 'local_manifests/**'
 
+# GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
+# softprops/action-gh-release needs contents: write, otherwise it fails
+# with "GitHub release failed with status: 403" after 3 retries.
+permissions:
+  contents: write
+
 env:
   TWRP_BRANCH: "twrp-12.1"
   MANIFEST_URL: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
@@ -241,7 +247,10 @@ jobs:
       # ------------------------------------------------------------------
       - name: Create release
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-        uses: softprops/action-gh-release@v1
+        # The image artifact is the real deliverable. If GitHub refuses the
+        # release (403 / permissions), do not fail the whole build over it.
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: twrp-tanzanite-${{ github.run_number }}
           name: TWRP tanzanite Build #${{ github.run_number }}
