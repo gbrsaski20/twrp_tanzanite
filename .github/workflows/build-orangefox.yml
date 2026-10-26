@@ -249,6 +249,51 @@ jobs:
           tail -n 12 "$RC"
 
       # ------------------------------------------------------------------
+      # STEP 5.5: Disk space gate.
+      # fox_12.1 needs ~45 GB of source plus ~12 GB of out/, which lands right
+      # on the runner's limit. Running out mid-build is what turns a normal
+      # ENOSPC into a confusing "Read-only file system" from whatever tool
+      # writes next (that is exactly how run 2 failed). Check first, and
+      # reclaim the one big safe chunk if we are short.
+      # ------------------------------------------------------------------
+      - name: Disk space gate
+        run: |
+          # --output=avail prints ONLY the available column, so the parse cannot
+          # be thrown off by a filesystem name containing spaces. Note that
+          # -P and --output are mutually exclusive in GNU df.
+          avail_gb() {
+            kb=$(df --output=avail / 2>/dev/null | tail -1 | tr -d ' ')
+            case "$kb" in
+              ''|*[!0-9]*) kb=$(df -k / | awk 'END {print $4}') ;;
+            esac
+            echo $(( kb / 1024 / 1024 ))
+          }
+
+          echo "=== free before build: $(avail_gb) GB ==="
+          echo "=== biggest dirs under fox/ ==="
+          du -xhd1 fox 2>/dev/null | sort -rh | head -12
+          echo "=== biggest dirs under fox/.repo ==="
+          du -xhd1 fox/.repo 2>/dev/null | sort -rh | head -6
+          df -h /
+
+          # .repo is only used by the repo tool itself. orangefox_sync.sh has
+          # already finished with it and nothing in the build reads it, so on
+          # a tight runner it is the biggest safe thing to drop.
+          if [ "$(avail_gb)" -lt 25 ]; then
+            echo "--- free < 25 GB, pruning fox/.repo to reclaim space ---"
+            du -sh fox/.repo 2>/dev/null || true
+            rm -rf fox/.repo
+            echo "=== free after prune: $(avail_gb) GB ==="
+            df -h /
+          fi
+
+          if [ "$(avail_gb)" -lt 10 ]; then
+            echo "::error::only $(avail_gb) GB free, the build needs ~12 GB for out/ and will hit ENOSPC"
+            exit 1
+          fi
+          echo "disk gate passed with $(avail_gb) GB free"
+
+      # ------------------------------------------------------------------
       # STEP 6: Build
       # The tree README documents this exact command for OrangeFox/SHRP:
       #   lunch twrp_tanzanite-eng && mka adbd vendorbootimage
@@ -261,9 +306,30 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES_ON_RECOVERY=true
           export LC_ALL="C.UTF-8"
           export FOX_BUILD_DEVICE="${DEVICE}"
-          export USE_CCACHE=1
-          export CCACHE_EXEC=/usr/bin/ccache
-          ccache -M 3G || true
+
+          # ---------------------------------------------------------------
+          # ccache is deliberately DISABLED here.
+          #
+          # Run 2 died at 1% (474/29683) with, for every single compile:
+          #   ccache: error: Failed to create directory
+          #   /home/runner/.cache/ccache/tmp: Read-only file system
+          # The compiler wrapper failed before clang ever ran, so nothing was
+          # actually compiled. It is not a source problem - the log shows the
+          # clang command line was built correctly and then ccache aborted.
+          #
+          # ccache also buys nothing in this workflow: there is no
+          # actions/cache step, so the cache starts empty on every run, and a
+          # 3G cap mostly evicts its own output. The TWRP workflow
+          # (.github/workflows/build.yml) builds this same tree successfully
+          # and never enables ccache at all.
+          #
+          # IMPORTANT: USE_CCACHE=0 does NOT work. AOSP's
+          # build/make/core/ccache.mk only treats the literal value "false" as
+          # off; every other non-empty value still installs the wrapper.
+          # ---------------------------------------------------------------
+          export USE_CCACHE=false
+          unset CCACHE_EXEC
+          export CCACHE_DISABLE=1
 
           # ---------------------------------------------------------------
           # envsetup.sh is NOT -e safe. source_vendorsetup() contains
