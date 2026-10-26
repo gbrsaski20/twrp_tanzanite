@@ -4,11 +4,11 @@
 #
 # WHY THIS EXISTS
 #   On tanzanite the kernel's fuel gauge node
-#   /sys/class/power_supply/battery/capacity gets stuck at 100 (wrong OCV table
-#   in the vendor fuel algorithm). TWRP reads that node, so recovery shows a
-#   permanent 100%. The same bug is documented by the battfix Magisk module,
-#   whose fix is: ignore the kernel percentage, compute SOC in userspace from
-#   the honest bms voltage/current, and push the result back.
+#   /sys/class/power_supply/battery/capacity is wrong: the vendor OCV table
+#   over-reports by roughly +60 points (at 3.68 V it claims 81% while the real
+#   SOC is about 21%). TWRP reads that node, so recovery shows a nonsense value,
+#   and worse, the kernel copies its own wrong figure into the RTC spare
+#   register, which Android then inherits on the next boot.
 #
 #   TWRP has no Android framework, so "cmd battery set level" is not available.
 #   Instead we write a sysfs-style capacity/status pair into a tmpfs directory
@@ -19,11 +19,22 @@
 # ALGORITHM (ported from battfix-tanzanite v1.2)
 #   OCV  = V_terminal - I * R_internal
 #   SOC  = piecewise-linear lookup of OCV in etc/ocv.txt
-#   then rate-limited and smoothed so the number does not jump around.
+#   then smoothed and rate-limited so the number does not jump around.
 #
 #   RMO = 95 mOhm was fitted on real tanzanite hardware (two current
-#   transitions at 0.46 A and 0.35 A gave 91 and 103 mOhm). The generic
-#   default of 60 reads about 4% too low, so do not "simplify" this to 60.
+#   transitions at 0.46 A and 0.35 A gave 91 and 103 mOhm). Verified again on
+#   this unit: 3.677 V at ~20% gives 21-22% with this table, matching Android.
+#   The generic default of 60 reads about 4% too low, so do not "simplify" it.
+#
+# ANTI-FLICKER (v3)
+#   A single voltage read jitters by 5-15 mV because the load changes from
+#   sample to sample. At 50 mV per 6% in the table that is ~1.2% of SOC, so a
+#   naive implementation bounces 19 -> 20 -> 19 forever.
+#   Two filters fix it:
+#     1. Median of three reads. Rejects a single spike without lagging like an
+#        average would.
+#     2. Hysteresis deadband. The displayed value only moves when the computed
+#        SOC is at least HYST points away, so 1-point noise is swallowed.
 #
 # UNITS
 #   voltage_now : microvolts      current_now : microamps (negative = discharging)
@@ -47,18 +58,57 @@ BMS=/sys/class/power_supply/bms
 BAT=/sys/class/power_supply/battery
 
 RMO=95          # internal resistance, mOhm
-INTERVAL=5      # sample period, seconds
+INTERVAL=5      # sample period, seconds (plus ~1 s spent sampling)
 MAXDROP=3       # max decrease per sample, %
 MAXRISE=2       # max increase per sample, %
 ALPHA=3         # new-sample weight out of 10 (3 = fairly smooth)
+HYST=2          # deadband: ignore changes smaller than this, %
+SAMPLES=3       # reads per sample, median taken
 
 rd() { cat "$1" 2>/dev/null | tr -d ' \r\n\t'; }
+
+isnum() {
+	case "$1" in
+		''|*[!0-9-]*) return 1 ;;
+	esac
+	return 0
+}
+
+# Median of SAMPLES reads from $1, falling back to $2 when $1 is unreadable.
+# Median (not mean) so one bad read cannot drag the result.
+med_read() {
+	_p=$1
+	_q=$2
+	_n=0
+	_v1=
+	_v2=
+	_v3=
+	while [ "$_n" -lt "$SAMPLES" ]; do
+		_n=$((_n + 1))
+		_x=$(rd "$_p")
+		isnum "$_x" || _x=$(rd "$_q")
+		isnum "$_x" || { echo ""; return; }
+		case "$_n" in
+			1) _v1=$_x ;;
+			2) _v2=$_x ;;
+			3) _v3=$_x ;;
+		esac
+		[ "$_n" -lt "$SAMPLES" ] && { sleep 0.3 2>/dev/null || sleep 1; }
+	done
+	# For SAMPLES=3 this is a 3-element sort-and-take-middle.
+	if [ "$_v1" -gt "$_v2" ]; then _t=$_v1; _v1=$_v2; _v2=$_t; fi
+	if [ "$_v2" -gt "$_v3" ]; then _t=$_v2; _v2=$_v3; _v3=$_t; fi
+	if [ "$_v1" -gt "$_v2" ]; then _t=$_v1; _v1=$_v2; _v2=$_t; fi
+	echo "$_v2"
+}
 
 mkdir -p "$OUT" 2>/dev/null
 
 # Seed immediately so TWRP never sees a missing file (it would show -1%).
+# This value is the kernel's wrong figure, but it only lives for the few
+# milliseconds before the first real sample replaces it outright.
 seed=$(rd "$BAT/capacity")
-case "$seed" in ''|*[!0-9]*) seed=50 ;; esac
+isnum "$seed" || seed=50
 echo "$seed" > "$OUT/capacity"
 echo "Discharging" > "$OUT/status"
 
@@ -69,18 +119,16 @@ TICK=0
 while true; do
 	TICK=$((TICK + 1))
 
-	V=$(rd "$BMS/voltage_now")
-	[ -z "$V" ] && V=$(rd "$BAT/voltage_now")
-	I=$(rd "$BMS/current_now")
-	[ -z "$I" ] && I=$(rd "$BAT/current_now")
+	V=$(med_read "$BMS/voltage_now" "$BAT/voltage_now")
+	I=$(med_read "$BMS/current_now" "$BAT/current_now")
 	ST=$(rd "$BAT/status")
 
-	case "$V" in
-		''|*[!0-9-]*) echo "$TICK v=$V INVALID" >> "$LOG"; sleep "$INTERVAL"; continue ;;
-	esac
-	case "$I" in
-		''|*[!0-9-]*) I=0 ;;
-	esac
+	if ! isnum "$V"; then
+		echo "$TICK v=$V INVALID" >> "$LOG"
+		sleep "$INTERVAL"
+		continue
+	fi
+	isnum "$I" || I=0
 
 	# Internal-resistance compensation, converted to millivolts because the
 	# OCV table is in mV. Works for both directions: discharging reports
@@ -117,14 +165,17 @@ while true; do
 	[ "$soc" -gt 100 ] && soc=100
 
 	# First real reading wins outright. Seeding DISP from the kernel capacity
-	# would make the number crawl down from a wrong 100 at MAXDROP per sample.
+	# would make the number crawl down from a wrong value at MAXDROP per tick.
 	if [ -z "$DISP" ]; then
 		DISP=$soc
 	else
 		d=$(( soc - DISP ))
-		[ "$d" -gt "$MAXRISE" ] && d=$MAXRISE
-		[ "$d" -lt $((0 - MAXDROP)) ] && d=$((0 - MAXDROP))
-		DISP=$(( DISP + d ))
+		# Deadband: a difference smaller than HYST is noise, leave it alone.
+		if [ "$d" -ge "$HYST" ] || [ "$d" -le $((0 - HYST)) ]; then
+			[ "$d" -gt "$MAXRISE" ] && d=$MAXRISE
+			[ "$d" -lt $((0 - MAXDROP)) ] && d=$((0 - MAXDROP))
+			DISP=$(( DISP + d ))
+		fi
 	fi
 	[ "$DISP" -lt 1 ] && DISP=1
 	[ "$DISP" -gt 100 ] && DISP=100
