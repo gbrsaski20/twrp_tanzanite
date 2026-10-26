@@ -33,6 +33,12 @@ on:
         options:
           - '12.1'
           - '14.1'
+  push:
+    branches: [ main, master ]
+    paths:
+      - '.github/workflows/build-orangefox.yml'
+      - 'orangefox/**'
+      - 'battfix/**'
 
 env:
   FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
@@ -144,17 +150,40 @@ jobs:
 
       # ------------------------------------------------------------------
       # STEP 4: Add the device tree
-      # The OrangeFox script syncs its own manifest, so our device tree is
-      # added afterwards via a local manifest + a second (cheap) repo sync.
+      # Clone directly instead of using a local manifest + repo sync:
+      # orangefox_sync.sh patches the files in .repo/manifests, and a
+      # follow-up repo sync can refuse to run because the manifest project
+      # has local modifications. git clone sidesteps that entirely.
+      # (orangefox/tanzanite.xml records the same two projects/branches.)
       # ------------------------------------------------------------------
-      - name: Add device tree (local manifest)
+      - name: Add device tree
         run: |
           set -e
-          mkdir -p fox/.repo/local_manifests
-          cp orangefox/tanzanite.xml fox/.repo/local_manifests/tanzanite.xml
-          cat fox/.repo/local_manifests/tanzanite.xml
-          cd fox
-          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+          DT=fox/device/xiaomi/tanzanite
+          KT=fox/device/xiaomi/tanzanite-kernel
+          mkdir -p fox/device/xiaomi
+
+          clone_retry() {
+            url="$1"; dst="$2"; br="$3"; n=0
+            while [ "$n" -lt 3 ]; do
+              n=$((n + 1))
+              if git clone --depth=1 -b "$br" "$url" "$dst"; then
+                return 0
+              fi
+              echo "clone failed (attempt $n/3), retrying in 10s"
+              rm -rf "$dst"
+              sleep 10
+            done
+            return 1
+          }
+
+          clone_retry https://github.com/puuuuh/recovery_device_xiaomi_tanzanite "$DT" 12.1_aosp
+          clone_retry https://github.com/puuuuh/android_device_xiaomi_tanzanite-kernel "$KT" vanilla
+
+          echo "=== device tree ==="
+          ls -1 "$DT" | head -25
+          echo "=== kernel tree ==="
+          ls -1 "$KT" | head -10
 
       - name: Verify device tree
         run: |
@@ -289,7 +318,7 @@ jobs:
           compression-level: 0
 
       - name: Create release
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         # The image artifact is the real deliverable; never fail the build
         # over a release permission problem.
         continue-on-error: true
@@ -303,7 +332,7 @@ jobs:
             **Device:** Xiaomi Redmi Note 14 4G
             **Codename:** tanzanite
             **Chipset:** MediaTek Helio G99 Ultra (MT6789)
-            **OrangeFox base:** R12.0 (fox_${{ github.event.inputs.fox_branch }} branch)
+            **OrangeFox base:** R12.0 (fox_${{ env.FOX_SYNC_BRANCH }} branch)
             **Recovery type:** vendor_boot (V4 header)
 
             ### Flash instructions:
