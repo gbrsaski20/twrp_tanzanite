@@ -264,9 +264,71 @@ jobs:
           export USE_CCACHE=1
           export CCACHE_EXEC=/usr/bin/ccache
           ccache -M 3G || true
+
+          # ---------------------------------------------------------------
+          # envsetup.sh is NOT -e safe. source_vendorsetup() contains
+          #     [ -n "$allowed" ] && allowed_files=$(cat "$allowed")
+          # which returns 1 whenever no allowed-vendorsetup_sh-files exists,
+          # and GitHub runs run: blocks as "bash -e". Run 1 died right after
+          # "including device/xiaomi/tanzanite/vendorsetup.sh" with a silent
+          # exit 1 because of this.
+          #
+          # So: turn -e off, xtrace envsetup into a file, and report the real
+          # return code instead of vanishing.
+          # ---------------------------------------------------------------
+          set +e
+          exec 9>/tmp/envsetup_trace.log
+          BASH_XTRACEFD=9
+          set -x
           source build/envsetup.sh
+          rc=$?
+          set +x
+          exec 9>&-
+          echo "=== envsetup rc=$rc ==="
+          if [ "$rc" -ne 0 ]; then
+            echo "--- last 40 traced commands ---"
+            tail -40 /tmp/envsetup_trace.log
+          fi
+          echo "--- lunch function: $(type -t lunch) ---"
+          echo "--- product makefiles ---"
+          cat device/xiaomi/tanzanite/AndroidProducts.mk
+
           lunch twrp_${DEVICE}-eng
-          mka adbd vendorbootimage -j$(nproc --all) | tee /tmp/fox_build.log
+          rc=$?
+          echo "=== lunch rc=$rc ==="
+          if [ "$rc" -ne 0 ]; then
+            echo "--- traced envsetup tail ---"
+            tail -40 /tmp/envsetup_trace.log
+            exit "$rc"
+          fi
+
+          set -o pipefail
+          mka adbd vendorbootimage -j$(nproc --all) 2>&1 | tee /tmp/fox_build.log
+          rc=${PIPESTATUS[0]}
+          echo "=== mka rc=$rc ==="
+          if [ "$rc" -ne 0 ]; then
+            echo "--- tail of build log ---"
+            tail -80 /tmp/fox_build.log
+          fi
+          exit "$rc"
+
+      # ------------------------------------------------------------------
+      # STEP 6.5: Dump diagnostics if the build step died silently.
+      # envsetup.sh could exit() rather than return, in which case the tail
+      # printed inside the build step never runs. This step always does.
+      # ------------------------------------------------------------------
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== envsetup xtrace (last 60) ==="
+          tail -60 /tmp/envsetup_trace.log 2>/dev/null || echo "(no trace file)"
+          echo ""
+          echo "=== build log (last 60) ==="
+          tail -60 /tmp/fox_build.log 2>/dev/null || echo "(no build log)"
+          echo ""
+          echo "=== tree sanity ==="
+          ls -1 fox/build/envsetup.sh fox/build/soong/soong_ui.bash 2>/dev/null
+          grep -n 'COMMON_LUNCH_CHOICES' fox/device/xiaomi/tanzanite/AndroidProducts.mk 2>/dev/null
 
       # ------------------------------------------------------------------
       # STEP 7: Collect output
