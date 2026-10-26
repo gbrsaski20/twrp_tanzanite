@@ -56,17 +56,27 @@ Verify connection:
 The Redmi Note 14 4G stores recovery inside the vendor_boot partition.
 Do NOT flash to "boot" or "recovery" partition — only to vendor_boot!
 
-After building (on your Linux/WSL2 machine), the output image is at:
-   ~/twrp-build/out/target/product/tanzanite/vendor_boot.img
+After building via GitHub Actions, download the image:
+   1. Open: https://github.com/gbrsaski20/twrp_tanzanite/actions
+   2. Click the latest successful run (green check)
+   3. Scroll down to "Artifacts"
+   4. Download "vendor_boot_twrp_tanzanite.zip"
+   5. Extract -> vendor_boot_twrp_tanzanite.img  (~64 MB)
 
-Copy it to your Windows machine, or if building in WSL2, access it at:
-   \\wsl$\Ubuntu-22.04\home\<username>\twrp-build\out\target\product\tanzanite\vendor_boot.img
+Or download from the Releases page (created on manual runs):
+   https://github.com/gbrsaski20/twrp_tanzanite/releases
+
+Copy the .img to F:\Tool RedmiNote14\ for convenience.
+
+Optional sanity check (PowerShell) - header must say VNDRBOOT:
+   $b = [System.IO.File]::ReadAllBytes("F:\Tool RedmiNote14\vendor_boot_twrp_tanzanite.img")[0..15]
+   [System.Text.Encoding]::ASCII.GetString($b)
 
 Flash command:
-   fastboot flash vendor_boot vendor_boot.img
+   fastboot flash vendor_boot vendor_boot_twrp_tanzanite.img
 
 Example (if the image is in F:\Tool RedmiNote14\):
-   fastboot flash vendor_boot "F:\Tool RedmiNote14\twrp_vendor_boot.img"
+   fastboot flash vendor_boot "F:\Tool RedmiNote14\vendor_boot_twrp_tanzanite.img"
 
 ==============================================================================
   STEP 4: BOOT TO TWRP RECOVERY
