@@ -45,12 +45,52 @@ OUT=/tmp/batt
 OCV=/system/etc/battfix_ocv.txt
 LOG=/tmp/battfix.log
 
-# The ramdisk's /system gets shadowed once the system partition is mounted, and
-# this loop re-reads the curve on every sample. Keep a tmpfs copy.
-if [ -f "$OCV" ]; then
-	cp -f "$OCV" /tmp/battfix_ocv.txt 2>/dev/null
+# Fallback curve, embedded on purpose. The copy under /system lives in the
+# recovery ramdisk, but /system gets shadowed by the real system partition as
+# soon as TWRP mounts it, and then the file simply is not there any more. If
+# that happens and the tmpfs copy is also gone (fresh /tmp, e.g. a later session
+# or a manual restart of the daemon), the lookup has no table at all and every
+# sample collapses to soc=0 -> clamped to 1%. That is what a display stuck at
+# 1% means: the table is missing, not the battery.
+# Keep this in sync with ocv.txt.
+OCV_TABLE='4400 100
+4350 99
+4300 96
+4250 92
+4200 87
+4150 82
+4100 76
+4050 70
+4000 64
+3950 58
+3900 51
+3850 44
+3800 37
+3750 30
+3700 24
+3650 18
+3600 13
+3550 9
+3500 6
+3450 3
+3400 1
+3350 0'
+
+# Prefer the shipped file, then the tmpfs copy, then the embedded table.
+# The tmpfs copy exists because this loop re-reads the curve on every sample
+# and the source file can disappear mid-session.
+if [ ! -s /tmp/battfix_ocv.txt ]; then
+	if [ -s "$OCV" ]; then
+		cp -f "$OCV" /tmp/battfix_ocv.txt 2>/dev/null
+	fi
 fi
-[ -f /tmp/battfix_ocv.txt ] && OCV=/tmp/battfix_ocv.txt
+if [ ! -s /tmp/battfix_ocv.txt ]; then
+	printf '%s\n' "$OCV_TABLE" > /tmp/battfix_ocv.txt 2>/dev/null
+	OCV_SRC="embedded"
+else
+	OCV_SRC="file"
+fi
+OCV=/tmp/battfix_ocv.txt
 
 # Prefer the raw gauge (bms); fall back to the battery node if bms is absent.
 BMS=/sys/class/power_supply/bms
@@ -103,6 +143,10 @@ med_read() {
 }
 
 mkdir -p "$OUT" 2>/dev/null
+
+# One separator per daemon start, so a stale log cannot be mistaken for the
+# current run, and so it is obvious which curve got used.
+echo "=== start pid=$$ ocv=$OCV_SRC lines=$(wc -l < "$OCV" 2>/dev/null | tr -d ' ') ===" >> "$LOG"
 
 # Seed immediately so TWRP never sees a missing file (it would show -1%).
 # This value is the kernel's wrong figure, but it only lives for the few
