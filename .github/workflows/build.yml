@@ -132,6 +132,56 @@ jobs:
             --prune
 
       # ------------------------------------------------------------------
+      # STEP 6.5: Patch device tree - FIX battery stuck at 100% in recovery
+      # ------------------------------------------------------------------
+      # ROOT CAUSE (TWRP android-12.1, recovery_utils/battery_utils.cpp):
+      #
+      #   GetBatteryInfo() returns capacity = 100 whenever the HIDL health HAL
+      #   query fails:
+      #       if (res != Result::SUCCESS) { capacity = 100; }
+      #
+      #   'res' stays Result::UNKNOWN when get_health_service() returns nullptr
+      #   (HAL not registered / died) or when the HAL answers with an error.
+      #   TWRP then displays a hardcoded 100% forever.
+      #
+      # FIX: define TW_USE_LEGACY_BATTERY_SERVICES. That flips twrp.cpp:426-456
+      # to read /sys/class/power_supply/battery/capacity directly and skip the
+      # health HAL completely. Wiring confirmed in the recovery repo Android.mk:
+      #       ifeq ($(TW_USE_LEGACY_BATTERY_SERVICES),true)
+      #           LOCAL_CFLAGS += -DTW_USE_LEGACY_BATTERY_SERVICES
+      #       endif
+      # ------------------------------------------------------------------
+      - name: Patch device tree (battery fix)
+        run: |
+          set -e
+          DT=twrp-build/device/xiaomi/tanzanite
+          if [ ! -f "$DT/BoardConfig.mk" ]; then
+            echo "ERROR: device tree not found at $DT"
+            exit 1
+          fi
+
+          if grep -q '^TW_USE_LEGACY_BATTERY_SERVICES' "$DT/BoardConfig.mk"; then
+            echo "Already patched, skipping."
+          else
+            {
+              echo ''
+              echo '# --- battery fix: read sysfs directly, skip the HIDL health HAL ---'
+              echo '# TWRP GetBatteryInfo() hardcodes capacity = 100 when the health HAL'
+              echo '# query fails, which is what pins the status bar at 100% in recovery.'
+              echo 'TW_USE_LEGACY_BATTERY_SERVICES := true'
+            } >> "$DT/BoardConfig.mk"
+          fi
+
+          # Visible build marker so we can confirm the new image is flashed:
+          # TWRP shows this string in About / on the splash.
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := A14_Tanzanite_battfix/' "$DT/BoardConfig.mk"
+
+          echo "=== BoardConfig.mk tail ==="
+          tail -n 10 "$DT/BoardConfig.mk"
+          echo "=== verification ==="
+          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
+
+      # ------------------------------------------------------------------
       # STEP 7: Setup build environment
       # ------------------------------------------------------------------
       - name: Setup build environment
@@ -190,7 +240,7 @@ jobs:
       # STEP 11: Create release (optional, only on manual dispatch)
       # ------------------------------------------------------------------
       - name: Create release
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: twrp-tanzanite-${{ github.run_number }}
@@ -213,6 +263,13 @@ jobs:
             ### Features:
             - ADB, Decryption, Display, Fastbootd, Flashing
             - MTP, Sideload, USB OTG, SD Card, Touch, Flashlight, Vibrator
+
+            ### Battery fix (this build):
+            - `TW_USE_LEGACY_BATTERY_SERVICES := true` - TWRP reads
+              `/sys/class/power_supply/battery/capacity` directly instead of the
+              HIDL health HAL, which was failing and falling back to a hardcoded 100%.
+            - TWRP version string shows `A14_Tanzanite_battfix` - if you still see
+              the old string, the old image is still flashed.
           files: |
             vendor_boot_twrp_tanzanite.img
           draft: false

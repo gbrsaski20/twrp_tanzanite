@@ -112,6 +112,60 @@ Once in TWRP:
    4. Copy backup to PC for safekeeping
 
 ==============================================================================
+  STEP 6: VERIFY THE BATTERY FIX (A14_Tanzanite_battfix)
+==============================================================================
+
+The first build showed a constant 100% in recovery. The cause was inside TWRP,
+not in the battery itself.
+
+recovery_utils/battery_utils.cpp (TWRP android-12.1) contains:
+
+    // If we can't read battery percentage, it may be a device without battery.
+    // In this situation, use 100 as a fake battery percentage.
+    if (res != Result::SUCCESS) {
+        capacity = 100;
+    }
+
+On this device the HIDL health HAL does not answer inside recovery, so
+res != Result::SUCCESS and TWRP pins the status bar at 100% permanently.
+
+The fix sets in BoardConfig.mk:
+
+    TW_USE_LEGACY_BATTERY_SERVICES := true
+
+which makes twrp.cpp read /sys/class/power_supply/battery/capacity directly
+and skip the health HAL entirely.
+
+--- How to confirm you are running the fixed build ----------------------------
+
+1) Main TWRP screen: the version string must end with
+       A14_Tanzanite_battfix
+   If it still says A14_Tanzanite or A12+_AOSP, the OLD image is still flashed.
+
+2) In TWRP -> Advanced -> Terminal, or via adb shell, run:
+
+   for d in /sys/class/power_supply/*; do
+     echo "== $d"
+     cat $d/capacity 2>/dev/null
+     cat $d/status   2>/dev/null
+     cat $d/voltage_now 2>/dev/null
+     cat $d/current_now 2>/dev/null
+   done
+
+   Compare the "battery" capacity against the on-screen percentage:
+     - values match              -> fixed, done.
+     - battery is also 100       -> the kernel fuel gauge is wrong, not TWRP
+                                    (see troubleshooting below).
+     - battery path missing      -> TWRP shows "-1%", battery module not loaded.
+
+--- About "Android also jumps to 100% after visiting recovery" ----------------
+
+TWRP only READS the gauge, it never writes it, so it cannot change what
+Android reports. If Android shows 100% for a while after leaving recovery,
+that is the fuel gauge re-learning its state on the next boot; it settles by
+itself. It is not caused by the percentage TWRP displayed.
+
+==============================================================================
   ALTERNATIVE: TEMPORARY BOOT (WITHOUT FLASHING)
 ==============================================================================
 
@@ -158,6 +212,17 @@ Problem: TWRP boots but decryption fails
 Problem: Build fails with missing dependencies
   -> Run: export ALLOW_MISSING_DEPENDENCIES=true
   -> Retry: mka vendorbootimage
+
+Problem: battery still stuck at 100% after the battfix build
+  -> First confirm the version string shows A14_Tanzanite_battfix.
+  -> Run the sysfs dump from STEP 6. If /sys/class/power_supply/battery/capacity
+     is ALSO 100, the kernel fuel gauge is lying. This is a known tanzanite
+     problem (inverted current_now sign + wrong OCV table). Workaround is to
+     read the "bms" node instead:
+         TW_CUSTOM_BATTERY_PATH := "/sys/class/power_supply/bms"
+     (setting this implicitly enables TW_USE_LEGACY_BATTERY_SERVICES too).
+  -> If /sys/class/power_supply/battery does not exist, TWRP shows "-1%".
+     That means the battery kernel modules did not load - check dmesg.
 
 Problem: Out of memory during build
   -> Reduce jobs: mka vendorbootimage -j4
