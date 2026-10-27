@@ -33,12 +33,46 @@
 # SAFE TO RUN: this is the same write the Android fuel-gauge daemon performs.
 # A wrong value only makes the number wrong for a few seconds; the algorithm
 # restores its own value on the next interrupt flow.
+#
+# WHERE TO RUN IT
+#   Both places, and they answer different questions:
+#     Android  -> does the override reach BatteryManager? This is the one that
+#                 matters, because Android is where the wrong number hurts.
+#     Recovery -> does the same write behave differently under the recovery
+#                 ramdisk? Useful as a control.
+#   Requires root either way (recovery is root already; Android needs
+#   adb root / su / KernelSU).
+#
+#   Android has no /tmp, so $TMP is resolved at runtime instead of hardcoded.
 # =============================================================================
 
 U=/sys/class/power_supply/battery/uisoc
 C=/sys/class/power_supply/battery/capacity
 V=/sys/class/power_supply/bms/voltage_now
 D=/tmp/batt/capacity
+
+# Scratch dir. Recovery has a writable /tmp; Android does not (its root is
+# read-only), so fall back to the one directory that always exists and is
+# writable: /data/local/tmp.
+TMP=/tmp
+mkdir -p "$TMP" 2>/dev/null
+if [ ! -w "$TMP" ]; then
+	TMP=/data/local/tmp
+	mkdir -p "$TMP" 2>/dev/null
+fi
+if [ ! -w "$TMP" ]; then
+	echo "RESULT: FAIL - no writable scratch directory (tried /tmp and /data/local/tmp)"
+	echo "        run this as root."
+	exit 1
+fi
+
+# Root is required to write a 0200 node. Report it early rather than letting
+# the write fail with a bare "permission denied" later.
+if [ "$(id -u 2>/dev/null)" != "0" ]; then
+	echo "RESULT: FAIL - not root (uid=$(id -u 2>/dev/null))."
+	echo "        Android: run 'su -c \"sh /data/local/tmp/test_uisoc.sh\"'"
+	exit 1
+fi
 
 echo "=============================================================="
 echo " uisoc override test"
@@ -116,9 +150,9 @@ echo
 echo "current capacity = $BEFORE"
 echo "will write $WRITE to uisoc  ( = ${TARGET}.00% )"
 
-if ! echo "$WRITE" > "$U" 2>/tmp/.uisocerr; then
-	echo "RESULT: FAIL - write rejected: $(cat /tmp/.uisocerr 2>/dev/null)"
-	rm -f /tmp/.uisocerr
+if ! echo "$WRITE" > "$U" 2>"$TMP/.uisocerr"; then
+	echo "RESULT: FAIL - write rejected: $(cat "$TMP/.uisocerr" 2>/dev/null)"
+	rm -f "$TMP/.uisocerr"
 	exit 1
 fi
 echo "write accepted"
