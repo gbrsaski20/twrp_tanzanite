@@ -46,11 +46,14 @@
 #
 # USAGE
 #   sh test_rtc_ui_soc.sh                      read-only report + honest SOC
+#   sh test_rtc_ui_soc.sh auto reboot          repair ONLY if the offset is bad,
+#                                              then reboot (the everyday command)
 #   sh test_rtc_ui_soc.sh restore reboot       seed the next boot with the real
 #                                              SOC, then reboot immediately
 #   sh test_rtc_ui_soc.sh write 100 reboot     seed an explicit value
 #   sh test_rtc_ui_soc.sh write 0 --force      the OCV branch (see warning above)
 #
+#   THRESH=10 overrides the `auto` threshold.
 #   Runs in both Android (needs root) and recovery.
 # =============================================================================
 
@@ -199,6 +202,7 @@ else
 fi
 
 # --- 4. verdict -------------------------------------------------------------
+MAXABS=0
 for n in $NODES; do
 	SEED=$(rd "$n")
 	isnum "$SEED" || SEED=-1
@@ -207,10 +211,13 @@ for n in $NODES; do
 	echo "  seed     $SEED %"
 	if [ -n "$HONEST" ] && [ "$SEED" -ge 0 ]; then
 		OFF=$(( SEED - HONEST ))
+		ABS=$OFF
+		[ "$ABS" -lt 0 ] && ABS=$(( 0 - ABS ))
+		[ "$ABS" -gt "$MAXABS" ] && MAXABS=$ABS
 		echo "  offset   $OFF (seed minus honest)"
 		if [ "$OFF" -ge 15 ]; then
 			echo "  -> the seed is what poisons the next boot."
-			echo "     'write 0' then reboot forces the OCV resync."
+			echo "     'restore reboot' writes the real SOC back."
 		elif [ "$OFF" -le -15 ]; then
 			echo "  -> the seed under-reports; the next boot will start too low."
 		else
@@ -223,6 +230,7 @@ done
 # MODES
 #   write <n> [reboot]    set the seed to n percent
 #   restore   [reboot]    set the seed to the honest SOC computed above
+#   auto      [reboot]    only act when the offset exceeds THRESH (default 10)
 #
 #   `reboot` closes the timing window: the running algorithm rewrites this
 #   register on every FG interrupt, so a value written and left sitting can be
@@ -237,6 +245,7 @@ MODE=$1
 VAL=
 DO_REBOOT=0
 FORCE=0
+THRESH=${THRESH:-10}
 for a in "$@"; do
 	case "$a" in
 		reboot) DO_REBOOT=1 ;;
@@ -247,10 +256,26 @@ done
 case "$MODE" in
 	write)   VAL=$2 ;;
 	restore) VAL=$HONEST ;;
+	auto)
+		if [ -z "$HONEST" ]; then
+			echo
+			echo "auto: honest SOC could not be computed, refusing to act."
+			exit 1
+		fi
+		if [ "$MAXABS" -le "$THRESH" ]; then
+			echo
+			echo "auto: worst offset is $MAXABS, within the $THRESH threshold."
+			echo "      healthy, nothing written."
+			exit 0
+		fi
+		echo
+		echo "auto: worst offset is $MAXABS, above the $THRESH threshold."
+		VAL=$HONEST
+		;;
 	"")      VAL= ;;
 	*)
 		echo
-		echo "usage: sh $0 [write <0..100> | restore] [reboot] [--force]"
+		echo "usage: sh $0 [write <0..100> | restore | auto] [reboot] [--force]"
 		exit 1
 		;;
 esac
