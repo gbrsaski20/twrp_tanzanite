@@ -33,6 +33,14 @@ on:
         options:
           - '12.1'
           - '14.1'
+      battery_fix:
+        description: 'Battery patch: on = battfixd + TW_CUSTOM_BATTERY_PATH, off = read the kernel node like Android'
+        required: true
+        default: 'off'
+        type: choice
+        options:
+          - 'off'
+          - 'on'
   push:
     branches: [ main, master ]
     paths:
@@ -44,6 +52,11 @@ env:
   FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
   DEVICE: "tanzanite"
   FOX_BUILD_DEVICE: "tanzanite"
+  # Default off: the gauge was repaired on 2026-10-27 (offset +1), so the
+  # recovery no longer needs to compute its own SOC. A push-triggered run has
+  # no inputs at all, so this fallback decides what a push builds.
+  BATTERY_FIX: ${{ github.event.inputs.battery_fix || 'off' }}
+  IMG_NAME: ${{ github.event.inputs.battery_fix == 'on' && 'vendor_boot_orangefox_tanzanite_battfix.img' || 'vendor_boot_orangefox_tanzanite_stockbatt.img' }}
 
 # GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
 # softprops/action-gh-release needs contents: write, otherwise 403.
@@ -196,13 +209,26 @@ jobs:
           echo "kernel modules bundled: $(ls -1 "$DT"/recovery/root/lib/modules/*.ko 2>/dev/null | wc -l)"
 
       # ------------------------------------------------------------------
-      # STEP 5: Battery fix (same fix as the TWRP build)
-      # The kernel fuel gauge on tanzanite reports a stuck 100 in
-      # /sys/class/power_supply/battery/capacity, and TWRP/OrangeFox read that
-      # node. battfixd.sh recomputes SOC from the honest bms voltage/current
-      # and writes it to /tmp/batt, which TW_CUSTOM_BATTERY_PATH points at.
+      # STEP 5: Battery patch - CONDITIONAL.
+      #
+      # WHY THIS IS NOW A TOGGLE
+      #   The gauge used to lie badly (a stuck 100, then a +67 offset after the
+      #   phone died mid-session), so recovery had to compute its own SOC from
+      #   bms voltage/current and feed TWRP through TW_CUSTOM_BATTERY_PATH.
+      #   On 2026-10-27 the RTC seed was repaired (mtk-gauge/rtc_ui_soc) and
+      #   battcheck reported offset +1, i.e. the kernel's own capacity agrees
+      #   with reality again. So the override is no longer needed, and reading
+      #   the kernel node directly makes recovery agree with Android.
+      #
+      #   battery_fix=off -> TWRP reads whatever the kernel reports, exactly
+      #                      like the ROM does. No daemon, no custom path.
+      #   battery_fix=on  -> the old behaviour: battfixd.sh writes /tmp/batt
+      #                      and TW_CUSTOM_BATTERY_PATH points TWRP at it.
+      #
+      #   If the gauge ever corrupts again, run this workflow with on.
       # ------------------------------------------------------------------
       - name: Patch device tree (battery fix)
+        if: env.BATTERY_FIX == 'on'
         run: |
           set -e
           DT=fox/device/xiaomi/tanzanite
@@ -415,8 +441,8 @@ jobs:
           OF=$(find "$OUT" -maxdepth 1 -name 'OrangeFox*.img' -type f 2>/dev/null | head -1)
 
           if [ -n "$VB" ]; then
-            cp "$VB" vendor_boot_orangefox_tanzanite.img
-            echo "vendor_boot.img -> vendor_boot_orangefox_tanzanite.img ($(stat -c%s vendor_boot_orangefox_tanzanite.img) bytes)"
+            cp "$VB" "$IMG_NAME"
+            echo "vendor_boot.img -> $IMG_NAME ($(stat -c%s "$IMG_NAME") bytes)"
           fi
           if [ -n "$OF" ]; then
             cp "$OF" "$(basename "$OF")"
@@ -430,17 +456,17 @@ jobs:
           fi
 
           # header sanity check
-          if [ -f vendor_boot_orangefox_tanzanite.img ]; then
+          if [ -f "$IMG_NAME" ]; then
             echo "=== header (must be VNDRBOOT) ==="
-            head -c 16 vendor_boot_orangefox_tanzanite.img; echo
+            head -c 16 "$IMG_NAME"; echo
           fi
 
       - name: Upload OrangeFox image
         uses: actions/upload-artifact@v4
         with:
-          name: orangefox_tanzanite
+          name: orangefox_tanzanite_${{ env.BATTERY_FIX }}
           path: |
-            vendor_boot_orangefox_tanzanite.img
+            ${{ env.IMG_NAME }}
             OrangeFox*.img
           retention-days: 30
           compression-level: 0
@@ -452,8 +478,8 @@ jobs:
         continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: orangefox-tanzanite-${{ github.run_number }}
-          name: OrangeFox tanzanite Build #${{ github.run_number }}
+          tag_name: orangefox-tanzanite-${{ env.BATTERY_FIX }}-${{ github.run_number }}
+          name: OrangeFox tanzanite (${{ env.BATTERY_FIX }}) Build #${{ github.run_number }}
           body: |
             ## OrangeFox Recovery for Xiaomi Redmi Note 14 4G (tanzanite)
 
@@ -462,18 +488,24 @@ jobs:
             **Chipset:** MediaTek Helio G99 Ultra (MT6789)
             **OrangeFox base:** R12.0 (fox_${{ env.FOX_SYNC_BRANCH }} branch)
             **Recovery type:** vendor_boot (V4 header)
+            **Battery patch:** `${{ env.BATTERY_FIX }}`
 
             ### Flash instructions:
             ```
-            fastboot flash vendor_boot vendor_boot_orangefox_tanzanite.img
+            fastboot flash vendor_boot ${{ env.IMG_NAME }}
             fastboot reboot recovery
             ```
 
-            ### Notes:
-            - Battery fix included: `TW_USE_LEGACY_BATTERY_SERVICES := true`
-            - Rollback to stock: flash the original vendor_boot.img
+            ### What "battery patch" means:
+            - **off** - recovery reads the kernel's own `capacity` node, the same
+              value Android uses. Use this while the gauge is healthy.
+            - **on** - `battfixd.sh` computes the SOC from bms voltage/current and
+              TWRP reads that instead (`TW_CUSTOM_BATTERY_PATH`). Use this if the
+              gauge ever reports a stuck or badly offset number again.
+
+            Rollback to stock: flash the original vendor_boot.img
           files: |
-            vendor_boot_orangefox_tanzanite.img
+            ${{ env.IMG_NAME }}
             OrangeFox*.img
           draft: false
           prerelease: false
