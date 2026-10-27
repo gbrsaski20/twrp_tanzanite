@@ -26,15 +26,14 @@
 #   bit 0x80 is the "valid" flag and is preserved, so writing 0 leaves
 #   spare3 = 0x80 and the getter returns 0.
 #
-# WHY 0 IS THE INTERESTING VALUE
-#   fgr_dod_init() in the recovery/Android battery path does:
-#       rtc_ui_soc = UNIT_TRANS_100 * get_rtc_ui_soc();
-#       if (rtc_ui_soc == 0 || con0_soc == 0)
-#               rtc_ui_soc = OCV_to_SOC_c(init_swocv);   <- honest resync
-#       else
-#               ui_d0_soc = rtc_ui_soc;                  <- trusts the stale value
-#   So a seed of 0 forces the OCV branch on the NEXT boot, which is the same
-#   resync a full charge produces - without waiting for a full charge.
+# WHY 0 IS **NOT** THE VALUE TO WRITE (measured, not theory)
+#   The `if (rtc_ui_soc == 0)` branch looks like a clean reset, but on real
+#   hardware it is a trap: at the moment fgr_dod_init() runs, the gauge has not
+#   necessarily produced a valid OCV yet, so OCV_to_SOC_c(init_swocv) can
+#   evaluate to 0 and the phone boots showing 1% on a full battery. Observed
+#   exactly that on this device: seed 99 -> write 0 -> next boot 1%.
+#   Write the REAL soc instead (`restore`), which leaves no room for the OCV
+#   path to guess.
 #
 # SAFETY
 #   Read mode changes nothing. Write mode changes what the next boot will
@@ -42,13 +41,15 @@
 #   counter and it does not write to the battery hardware.
 #
 #   The running algorithm rewrites this register on every FG interrupt, so a
-#   written value can be clobbered within seconds. The script reads back
-#   immediately to show whether that happened. Reboot straight after writing.
+#   written value can be clobbered within seconds. Append `reboot` so the write
+#   and the reboot happen in one shot.
 #
 # USAGE
-#   sh test_rtc_ui_soc.sh                 read-only report + honest SOC
-#   sh test_rtc_ui_soc.sh write 0         force the OCV resync on next boot
-#   sh test_rtc_ui_soc.sh write 20        seed the next boot with 20%
+#   sh test_rtc_ui_soc.sh                      read-only report + honest SOC
+#   sh test_rtc_ui_soc.sh restore reboot       seed the next boot with the real
+#                                              SOC, then reboot immediately
+#   sh test_rtc_ui_soc.sh write 100 reboot     seed an explicit value
+#   sh test_rtc_ui_soc.sh write 0 --force      the OCV branch (see warning above)
 #
 #   Runs in both Android (needs root) and recovery.
 # =============================================================================
@@ -219,29 +220,82 @@ for n in $NODES; do
 done
 
 # --- 5. optional write ------------------------------------------------------
-if [ "$1" = "write" ]; then
-	VAL=$2
-	if ! isnum "$VAL" || [ "$VAL" -lt 0 ] || [ "$VAL" -gt 100 ]; then
+# MODES
+#   write <n> [reboot]    set the seed to n percent
+#   restore   [reboot]    set the seed to the honest SOC computed above
+#
+#   `reboot` closes the timing window: the running algorithm rewrites this
+#   register on every FG interrupt, so a value written and left sitting can be
+#   gone within seconds. Write-and-reboot in one shot is the only reliable way.
+#
+#   `write 0` now needs --force, because it is NOT the safe reset it looks like.
+#   Measured on real hardware: seed 0 made the next boot take the OCV branch
+#   while the gauge had not produced a valid OCV yet, so OCV_to_SOC_c() got 0
+#   and the phone booted showing 1% with a full battery. Use `restore` instead.
+# ---------------------------------------------------------------------------
+MODE=$1
+VAL=
+DO_REBOOT=0
+FORCE=0
+for a in "$@"; do
+	case "$a" in
+		reboot) DO_REBOOT=1 ;;
+		--force) FORCE=1 ;;
+	esac
+done
+
+case "$MODE" in
+	write)   VAL=$2 ;;
+	restore) VAL=$HONEST ;;
+	"")      VAL= ;;
+	*)
+		echo
+		echo "usage: sh $0 [write <0..100> | restore] [reboot] [--force]"
+		exit 1
+		;;
+esac
+
+if [ -n "$MODE" ]; then
+	if [ -z "$VAL" ] || ! isnum "$VAL" || [ "$VAL" -lt 0 ] || [ "$VAL" -gt 100 ]; then
 		echo
 		echo "REFUSED: value must be 0..100 (got '$VAL')."
+		[ "$MODE" = "restore" ] && echo "          (honest SOC could not be computed)"
 		exit 1
 	fi
+
+	if [ "$VAL" -eq 0 ] && [ "$FORCE" -ne 1 ]; then
+		echo
+		echo "REFUSED: 0 is not a safe reset."
+		echo "  Measured on this device: writing 0 made the next boot take the"
+		echo "  OCV branch before the gauge had a valid OCV, so it computed 0%"
+		echo "  and the phone booted showing 1% on a full battery."
+		echo "  Use 'restore' to write the real SOC instead."
+		echo "  If you really want 0, add --force."
+		exit 1
+	fi
+
 	echo
 	echo "--- writing $VAL ---"
 	for n in $NODES; do
 		if echo "$VAL" > "$n" 2>/dev/null; then
 			echo "  $n <- $VAL"
-			sleep 1
 			echo "    read back: $(rd "$n")"
-			echo "    (if this is not $VAL, the running algorithm overwrote it"
-			echo "     already - reboot immediately after writing)"
 		else
 			echo "  $n write FAILED (read-only?)"
 		fi
 	done
-	echo
-	echo "Next boot will use this seed. If you wrote 0, the battery code takes"
-	echo "the OCV branch instead, which is the same resync a full charge gives."
+
+	if [ "$DO_REBOOT" -eq 1 ]; then
+		echo
+		echo "rebooting now, so the algorithm cannot overwrite it"
+		sync
+		reboot
+	else
+		echo
+		echo "The next boot will use this seed. Do NOT leave it sitting here:"
+		echo "the running algorithm rewrites it on the next FG interrupt."
+		echo "Reboot now, or re-run with 'reboot' on the end."
+	fi
 fi
 
 echo
