@@ -106,6 +106,23 @@ for n in /proc/ppm /proc/cpufreq /proc/cpuhvfs /sys/kernel/ppm; do
 	fi
 done
 
+# /proc/cpuhvfs is the one that matters: phyclk and phyvolt are RW and write
+# straight to the PLL and the regulator, bypassing the DVFS table.
+if [ -d /proc/cpuhvfs ]; then
+	echo
+	echo "--- /proc/cpuhvfs detail (the CPU OC hook)"
+	for f in phyclk phyvolt usram_repo; do
+		if [ -e "/proc/cpuhvfs/$f" ]; then
+			echo "  $f  perms: $(ls -l "/proc/cpuhvfs/$f" 2>/dev/null | cut -c1-10)"
+			rd "/proc/cpuhvfs/$f" | head -6 | sed 's/^/      /'
+		else
+			echo "  $f  -> -"
+		fi
+	done
+	echo "  (phyclk write format: '<cluster> <freq_KHz>')"
+	echo "  (phyvolt write format: '<cluster> <volt_uV>')"
+fi
+
 # --- 3. GPU ------------------------------------------------------------------
 sec "3. GPU frequency control"
 GPUDIR=
