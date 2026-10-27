@@ -78,6 +78,7 @@ echo "kernel: $(cat /proc/version 2>/dev/null)" >> "$OUT"
 echo >> "$OUT"
 
 run probe_batt.sh
+run test_rtc_ui_soc.sh
 run test_uisoc.sh
 
 # --- post-run state ---------------------------------------------------------
