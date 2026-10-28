@@ -116,6 +116,32 @@ Kenapa bukan `fox_14.1`: butuh ~85 GB disk (runner GitHub tidak cukup), dan
 tree ini memang berbasis `twrp-12.1`. OrangeFox sendiri menyarankan `fox_12.1`
 untuk ROM Android 12 ke atas.
 
+## Baterai: bug "100% saat masuk recovery"
+
+Bug paling serius di perangkat ini, dan sudah diperbaiki. Ringkasnya:
+
+- TWRP hanya bisa membaca `battery/capacity`, dan di kernel ini node itu tidak
+  bisa dipakai — driver gauge salah skala ADC sehingga selalu boot dengan
+  keyakinan baterai penuh.
+- `battfixd.sh` menghitung SOC jujur dari OCV dan menulisnya ke `/tmp/batt`,
+  yang dibaca recovery karena binary-nya dikompilasi dengan
+  `TW_CUSTOM_BATTERY_PATH := "/tmp/batt"`.
+- Patch DTB `mtk_gauge` mematikan latch 100% (`KEEP_100_PERCENT`,
+  `g_FG_PSEUDO100*`).
+- `reset_fg_rtc_set` sekali untuk membuang state gauge yang korup.
+
+**Ketiganya diperlukan** — patch DTB tidak bisa menolong kalau coulomb counter-nya
+sendiri sudah 100%, dan seed `battfixd` kalah kalau state gauge masih korup.
+
+Detail lengkap, angka pengukuran, dan prosedur perbaikannya ada di
+**[BATTERY.md](BATTERY.md)**.
+
+Uji logika filter tanpa HP:
+
+```sh
+bash battfix/test_smooth.sh
+```
+
 ## Features (confirmed working)
 ADB, Decryption, Display, Fastbootd, Flashing, MTP, Sideload, USB OTG, SD Card, Touch, Flashlight, Vibrator
 
