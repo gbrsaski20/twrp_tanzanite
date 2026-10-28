@@ -1,0 +1,35 @@
+# --- build artefacts and scratch space -------------------------------------
+# work/ holds extracted ramdisks, dmesg/logcat dumps and the decoded fragments.
+# It reached ~500 MB during the vendor_boot investigation, so it must never be
+# committed. Everything in it can be regenerated with tools/unpack_any.py.
+/work/
+/bootimg_work/
+/dist/
+
+# .ref/ is mostly a copy of upstream TWRP sources kept for reading. The two
+# files worth keeping (twrp.cpp, list_ramdisk.py) are force-added by path.
+.ref/
+
+# --- binaries ---------------------------------------------------------------
+# Images are 64 MB each and are produced by tools/patch_fast.py from a stock
+# vendor_boot plus the scripts in this repo. Keep them out of git.
+*.img
+*.zip
+*.lz4
+*.cpio
+
+# --- superseded scripts -----------------------------------------------------
+# Folded into the files that replaced them; kept on disk for reference only.
+#   battprobe.sh -> battmode.sh (report mode)
+#   battseed.sh  -> the seed loop inside battfixd.sh
+#   test_ocv.sh  -> test_smooth.sh (and it calls ocv_table(), which no longer
+#                   exists - the table is an OCV_TABLE variable now)
+/battfix/battprobe.sh
+/battfix/battseed.sh
+/battfix/test_ocv.sh
+
+# --- python / editor noise --------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+.vscode/
