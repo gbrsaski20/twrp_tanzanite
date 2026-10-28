@@ -1,0 +1,6 @@
+id=tanzanite_oc
+name=Tanzanite CPU+GPU Overclock
+version=v1.0
+versionCode=1
+author=gbrsaski20
+description=Runtime CPU overclock via the MTK cpuhvfs debug hook (phyclk/phyvolt) and GPU overclock via gpufreqv2, for Redmi Note 14 4G (tanzanite, MT6789). Nothing is written to any partition - a reboot always returns to stock.
