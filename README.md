@@ -1,156 +1,63 @@
-# TWRP vendor_boot for Xiaomi Redmi Note 14 4G (tanzanite)
+# Recovery untuk Redmi Note 14 4G
 
-Build TWRP recovery `vendor_boot.img` lewat GitHub Actions — gratis, tanpa perlu PC Linux/WSL2.
+<div align="center">
 
-## Kebutuhan Storage (WAJIB DIBACA)
+**TWRP & OrangeFox · codename `tanzanite` · maintainer [@gbrsaski20](https://github.com/gbrsaski20)**
 
-Build TWRP dari source AOSP itu **besar**. Angka realistis:
+[![Build TWRP](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build.yml/badge.svg)](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build.yml)
+[![Build OrangeFox](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build-orangefox.yml/badge.svg)](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build-orangefox.yml)
+[![Device](https://img.shields.io/badge/device-tanzanite-2ea44f)](https://github.com/gbrsaski20/twrp_tanzanite)
+[![Android](https://img.shields.io/badge/Android-14-3ddc84?logo=android&logoColor=white)](https://www.android.com/)
 
-| Komponen | Ukuran |
-|----------|--------|
-| Ubuntu base (WSL) | ~4 GB |
-| Swapfile | 8 GB |
-| Source AOSP twrp-12.1 (`.repo` + working tree) | **25-29 GB** |
-| `out/` (hasil build recovery) | 8-12 GB |
-| ccache (kalau aktif) | 0-5 GB |
-| **Subtotal** | **45-58 GB** |
-| ext4 reserved (5% default) | +2-3 GB |
-| **PRAKTIS BUTUH** | **~60 GB** |
+</div>
 
-> **50GB TIDAK CUKUP.** Minimum 60 GB, nyaman di 80 GB.
+Build recovery `vendor_boot.img` untuk **Xiaomi Redmi Note 14 4G** langsung melalui GitHub Actions. Source disinkronkan dari tree perangkat dan manifest upstream; workflow menyertakan penyesuaian baterai recovery untuk perangkat ini.
 
-Penghematan yang bisa dipakai:
-- Swap 8GB (jangan 16GB — buang space)
-- `USE_CCACHE=0` → hemat 5GB
-- Hapus `.repo` setelah build sukses kalau gak perlu rebuild
+> **Perhatian:** image ini hanya untuk Redmi Note 14 4G dengan codename `tanzanite`. Jangan flash ke model lain. Modifikasi partisi berisiko; baca [panduan flash](flash_instructions.txt) dan pastikan file yang diunduh berasal dari build yang benar.
 
-## Cara Pakai (Step by Step)
+## Pilih recovery
 
-### 1. Bikin repo GitHub baru
-- Pergi ke https://github.com/new
-- Nama repo: `twrp-tanzanite-build` (atau apa aja)
-- Set **Public** (wajib public biar gratis 2000 menit/bulan)
-- Centang "Add a README file"
-- Klik **Create repository**
+| Recovery | Build | Hasil |
+| --- | --- | --- |
+| **TWRP** | [Buka workflow TWRP](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build.yml) | Artifact `vendor_boot_twrp_tanzanite` |
+| **OrangeFox R12.0** | [Buka workflow OrangeFox](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build-orangefox.yml) | Artifact mengikuti opsi build; dengan battery fix: `vendor_boot_orangefox_tanzanite_gbrsaski20.img` |
 
-### 2. Upload folder ini ke repo
-Copy semua isi folder `twrp_tanzanite/` ke root repo:
-```
-twrp_tanzanite/
-├── .github/workflows/build.yml    <- workflow CI
-├── local_manifests/tanzanite.xml  <- device tree config
-├── build_twrp_tanzanite.sh        <- build script (untuk WSL2 opsional)
-├── flash_instructions.txt         <- cara flash
-└── README.md                      <- file ini
-```
+### Cara build dan download
 
-Cara upload:
-- Buka repo di GitHub
-- Klik **Add file -> Upload files**
-- Drag semua file dari folder `twrp_tanzanite/`
-- Commit
+1. Buka workflow yang diinginkan dari tabel, lalu pilih **Run workflow** pada branch `main`.
+2. Untuk OrangeFox, gunakan branch `12.1` dan biarkan **battery fix** aktif (`on`).
+3. Tunggu sampai status run hijau, lalu buka halaman run tersebut.
+4. Unduh ZIP pada bagian **Artifacts**, kemudian ekstrak image-nya.
 
-atau pakai git:
-```bash
-cd twrp_tanzanite
-git init
-git add .
-git commit -m "TWRP tanzanite build config"
-git branch -M main
-git remote add origin https://github.com/USERNAME/twrp-tanzanite-build.git
-git push -u origin main
-```
+> Build membutuhkan waktu dan kuota GitHub Actions yang cukup. Run yang gagal tidak menghasilkan image yang siap dipakai.
 
-### 3. Jalankan build
-- Buka repo di GitHub
-- Klik tab **Actions**
-- Pilih **Build TWRP vendor_boot (tanzanite)** di sidebar kiri
-- Klik **Run workflow** (tombol hijau)
-- Tunggu 90-150 menit (build di cloud GitHub)
+## Flash
 
-### 4. Download hasilnya
-Setelah build selesai (centang hijau):
-- Klik run yang selesai
-- Scroll ke bawah cari **Artifacts** -> `vendor_boot_twrp_tanzanite`
-- Klik download -> dapat `vendor_boot_twrp_tanzanite.zip`
-- Extract -> ada `vendor_boot_twrp_tanzanite.img`
+Image recovery berada di partisi `vendor_boot`. Ikuti langkah dan perintah khusus perangkat di **[flash_instructions.txt](flash_instructions.txt)**. Jangan menebak nama partisi atau memakai image dari workflow lain. Setelah flash, reboot langsung ke recovery untuk memastikan image terpasang.
 
-Atau kalau auto-release jalan, download dari halaman **Releases**.
+## Penyesuaian baterai
 
-### 5. Flash ke HP
-```
-fastboot flash vendor_boot vendor_boot_twrp_tanzanite.img
-fastboot reboot recovery
-```
+Recovery menyertakan `battfixd`, yang menghitung perkiraan SOC dari tegangan dan arus baterai, menampilkan nilainya di recovery, serta menyiapkan seed RTC untuk boot Android berikutnya. Perubahan ini ditujukan untuk kasus persentase baterai meloncat setelah reboot dari recovery.
 
-## Device Info
-- **Device:** Xiaomi Redmi Note 14 4G
-- **Codename:** tanzanite
-- **Chipset:** MediaTek Helio G99 Ultra (MT6789)
-- **Android:** 14 (HyperOS)
-- **Recovery type:** vendor_boot (V4 header)
-- **Partition scheme:** Virtual A/B, dynamic partitions, F2FS userdata
+Perbaikan ini masih perlu validasi di perangkat, terutama pada boot sistem pertama setelah recovery dan saat baterai rendah. **Belum ada jaminan semua kondisi sudah teratasi.** Catatan investigasi, logika, dan langkah diagnosis tersedia di **[BATTERY.md](BATTERY.md)** dan **[RESEARCH-battery-gauge.md](RESEARCH-battery-gauge.md)**.
 
-## Sources
-- Recovery tree: https://github.com/puuuuh/recovery_device_xiaomi_tanzanite (branch: 12.1_aosp)
-- Prebuilt kernel: https://github.com/puuuuh/android_device_xiaomi_tanzanite-kernel (branch: vanilla)
-- TWRP manifest: https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp (branch: **twrp-12.1**)
-- OrangeFox sync: https://gitlab.com/OrangeFox/sync (branch: master, `fox_12.1` = R12.0)
+## Spesifikasi perangkat
 
-> Catatan: `puuuuh/android_device_mediatek_sepolicy_vndr` **tidak dipakai** — repo itu
-> tidak punya branch `main`, dan recovery tree ini tidak pernah me-reference sepolicy.
+| | |
+| --- | --- |
+| Perangkat | Xiaomi Redmi Note 14 4G |
+| Codename | `tanzanite` |
+| Chipset | MediaTek Helio G99 Ultra · MT6789 |
+| Platform | Android 14 · vendor boot v4 |
+| Recovery | TWRP 12.1 / OrangeFox R12.0 |
 
-## OrangeFox (opsional)
+## Sumber upstream
 
-Device tree ini sudah punya `vendorsetup.sh` + `fox_tanzanite.mk`, jadi bisa
-langsung di-build jadi OrangeFox tanpa ubah apa-apa.
+- [Recovery device tree](https://github.com/puuuuh/recovery_device_xiaomi_tanzanite) · branch `12.1_aosp`
+- [Prebuilt kernel](https://github.com/puuuuh/android_device_xiaomi_tanzanite-kernel) · branch `vanilla`
+- [TWRP manifest](https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp) · branch `twrp-12.1`
+- [OrangeFox sync](https://gitlab.com/OrangeFox/sync) · branch `fox_12.1`
 
-- Workflow: `.github/workflows/build-orangefox.yml`
-- Branch: `fox_12.1` → OrangeFox **R12.0** (rilis stabil terbaru)
-- Manifest device tree: `orangefox/tanzanite.xml`
+## Laporkan masalah
 
-Jalankan lewat **Actions → Build OrangeFox vendor_boot (tanzanite) → Run workflow**.
-Hasilnya `vendor_boot_orangefox_tanzanite.img`, flash dengan cara yang sama.
-
-Kenapa bukan `fox_14.1`: butuh ~85 GB disk (runner GitHub tidak cukup), dan
-tree ini memang berbasis `twrp-12.1`. OrangeFox sendiri menyarankan `fox_12.1`
-untuk ROM Android 12 ke atas.
-
-## Baterai: persentase loncat saat reboot
-
-Di recovery, `battfixd.sh` menghitung SOC dari OCV dan menyediakannya lewat
-`/tmp/batt`, yang dibaca karena binary recovery memakai
-`TW_CUSTOM_BATTERY_PATH := "/tmp/batt"`. Daemon juga menyiapkan seed RTC
-`mtk-gauge/rtc_ui_soc` untuk boot Android berikutnya.
-
-Driver MT6358 memperlakukan seed `0` sebagai "tidak ada data". Kode v4
-menginisialisasi seed yang kosong/invalid dari sampel OCV pertama yang valid,
-memperbarui seed yang stale, dan menyimpan `1` saat SOC terhitung 0 agar tidak
-memicu fallback PTIM yang salah skala. Perubahan ini menargetkan loncatan pada
-boot Android pertama setelah masuk recovery; v4 masih perlu diuji di perangkat.
-
-Android tetap memakai fuel gauge kernel. Recovery memperbaiki tampilan dan
-menyiapkan seed antar-boot; v4 tidak mengubah skala PTIM di driver kernel.
-
-Detail lengkap, angka pengukuran, dan prosedur perbaikannya ada di
-**[BATTERY.md](BATTERY.md)**.
-
-Uji logika filter tanpa HP:
-
-```sh
-bash battfix/test_smooth.sh
-```
-
-## Features (confirmed working)
-ADB, Decryption, Display, Fastbootd, Flashing, MTP, Sideload, USB OTG, SD Card, Touch, Flashlight, Vibrator
-
-## Bug Fix Guide (setelah flash)
-Kalau ada bug setelah flash, kita fix bareng. Bug yang umum:
-
-1. **Touch gak jalan** -> kernel module touchscreen gak load. Cek `dmesg` di TWRP terminal.
-2. **Decryption fail** -> FBE aes-256-xts. Coba reboot ke system dulu lalu balik ke recovery.
-3. **TWRP gak stick** -> system overwrite. Flash ulang lalu `fastboot reboot recovery` langsung.
-4. **Black screen** -> panel driver issue. Cek `BOARD_VENDOR_CMDLINE` dan DTB.
-5. **Fastbootd gak jalan** -> boot control HAL issue. Cek `android.hardware.boot@1.2-mtkimpl`.
-
-Upload log TWRP (adb shell dmesg / logcat) terus kirim ke sini, kita analisa bareng.
+Sertakan nama recovery, status dan tautan run Actions, versi yang tampil di layar recovery, serta log yang relevan. Untuk masalah baterai, lihat prosedur pengambilan log di [BATTERY.md](BATTERY.md). Jangan unggah informasi pribadi dari log.
