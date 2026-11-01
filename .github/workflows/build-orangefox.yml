@@ -279,8 +279,14 @@ jobs:
         run: |
           set -e
           DT=fox/device/xiaomi/tanzanite
+          KT=fox/device/xiaomi/tanzanite-kernel
           RC="$DT/recovery/root/init.recovery.mt6789.rc"
-          mkdir -p "$DT/recovery/root/system/bin"
+          MODDIR="$DT/recovery/root/lib/modules"
+          mkdir -p "$DT/recovery/root/system/bin" "$MODDIR"
+          for module in flashlight.ko flashlights-mt6789-o7.ko; do
+            test -f "$KT/modules_ramdisk/$module" || { echo "ERROR: missing kernel module $module"; exit 1; }
+            cp "$KT/modules_ramdisk/$module" "$MODDIR/$module"
+          done
           cp flashlight/tanzanite-flashlightd.sh "$DT/recovery/root/system/bin/tanzanite-flashlightd.sh"
           chmod 0755 "$DT/recovery/root/system/bin/tanzanite-flashlightd.sh"
           sh -n "$DT/recovery/root/system/bin/tanzanite-flashlightd.sh"
@@ -304,9 +310,17 @@ jobs:
               '    seclabel u:r:recovery:s0' >> "$RC"
           fi
 
+          # These matching kernel modules are omitted from modules.load.recovery.
+          # TWRP's module loader loads the flashlight core and MT6789 driver.
+          if ! grep -q '^TW_LOAD_VENDOR_MODULES' "$DT/device.mk"; then
+            printf '\n# MT6789 flashlight core and device driver.\nTW_LOAD_VENDOR_MODULES := "flashlight.ko flashlights-mt6789-o7.ko"\n' >> "$DT/device.mk"
+          fi
+
           echo '=== flashlight bridge ==='
           grep -n 'OF_FL_PATH1' "$DT/BoardConfig.mk"
+          grep -n 'TW_LOAD_VENDOR_MODULES' "$DT/device.mk"
           grep -n 'tanzanite-flashlightd' "$RC"
+          ls -lh "$MODDIR/flashlight.ko" "$MODDIR/flashlights-mt6789-o7.ko"
 
       # ------------------------------------------------------------------
       # STEP 5.5: Disk space gate.
