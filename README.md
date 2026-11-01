@@ -39,6 +39,8 @@ Image recovery berada di partisi `vendor_boot`. Ikuti langkah dan perintah khusu
 
 Recovery menyertakan `battfixd`, yang menghitung perkiraan SOC dari tegangan dan arus baterai, menampilkan nilainya di recovery, serta menyiapkan seed RTC untuk boot Android berikutnya. Perubahan ini ditujukan untuk kasus persentase baterai meloncat setelah reboot dari recovery.
 
+Build OrangeFox berikutnya menyertakan bridge flashlight MT6789: tombol flashlight diarahkan ke node driver khusus perangkat melalui file kontrol recovery. Perlu diuji kembali pada perangkat setelah image baru terpasang.
+
 Perbaikan ini masih perlu validasi di perangkat, terutama pada boot sistem pertama setelah recovery dan saat baterai rendah. **Belum ada jaminan semua kondisi sudah teratasi.** Catatan investigasi, logika, dan langkah diagnosis tersedia di **[BATTERY.md](BATTERY.md)** dan **[RESEARCH-battery-gauge.md](RESEARCH-battery-gauge.md)**.
 
 ## Spesifikasi perangkat

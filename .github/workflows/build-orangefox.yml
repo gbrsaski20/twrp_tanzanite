@@ -45,6 +45,7 @@ on:
     branches: [ main, master ]
     paths:
       - '.github/workflows/build-orangefox.yml'
+      - 'flashlight/**'
       - 'orangefox/**'
 
 env:
@@ -273,6 +274,40 @@ jobs:
           echo "=== verification ==="
           grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
           tail -n 12 "$RC"
+
+      - name: Configure tanzanite flashlight bridge
+        run: |
+          set -e
+          DT=fox/device/xiaomi/tanzanite
+          RC="$DT/recovery/root/init.recovery.mt6789.rc"
+          mkdir -p "$DT/recovery/root/system/bin"
+          cp flashlight/tanzanite-flashlightd.sh "$DT/recovery/root/system/bin/tanzanite-flashlightd.sh"
+          chmod 0755 "$DT/recovery/root/system/bin/tanzanite-flashlightd.sh"
+          sh -n "$DT/recovery/root/system/bin/tanzanite-flashlightd.sh"
+
+          if grep -q '^OF_FL_PATH1[[:space:]]*[:?+]*=' "$DT/BoardConfig.mk"; then
+            sed -i 's|^OF_FL_PATH1[[:space:]]*[:?+]*=.*|OF_FL_PATH1 := /tmp/flashlight|' "$DT/BoardConfig.mk"
+          else
+            printf '\n# Bridge OrangeFox flashlight UI to the MT6789 driver.\nOF_FL_PATH1 := /tmp/flashlight\n' >> "$DT/BoardConfig.mk"
+          fi
+
+          if ! grep -q 'service tanzanite-flashlightd' "$RC"; then
+            cat >> "$RC" <<'EOF'
+
+on boot
+    start tanzanite-flashlightd
+
+service tanzanite-flashlightd /system/bin/sh /system/bin/tanzanite-flashlightd.sh
+    user root
+    group root
+    disabled
+    seclabel u:r:recovery:s0
+EOF
+          fi
+
+          echo '=== flashlight bridge ==='
+          grep -n 'OF_FL_PATH1' "$DT/BoardConfig.mk"
+          grep -n 'tanzanite-flashlightd' "$RC"
 
       # ------------------------------------------------------------------
       # STEP 5.5: Disk space gate.
