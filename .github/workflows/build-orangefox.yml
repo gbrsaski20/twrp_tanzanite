@@ -292,17 +292,16 @@ jobs:
           fi
 
           if ! grep -q 'service tanzanite-flashlightd' "$RC"; then
-            cat >> "$RC" <<'EOF'
-
-on boot
-    start tanzanite-flashlightd
-
-service tanzanite-flashlightd /system/bin/sh /system/bin/tanzanite-flashlightd.sh
-    user root
-    group root
-    disabled
-    seclabel u:r:recovery:s0
-EOF
+            printf '%s\n' \
+              '' \
+              'on boot' \
+              '    start tanzanite-flashlightd' \
+              '' \
+              'service tanzanite-flashlightd /system/bin/sh /system/bin/tanzanite-flashlightd.sh' \
+              '    user root' \
+              '    group root' \
+              '    disabled' \
+              '    seclabel u:r:recovery:s0' >> "$RC"
           fi
 
           echo '=== flashlight bridge ==='
