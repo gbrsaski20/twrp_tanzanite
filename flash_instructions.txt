@@ -112,12 +112,13 @@ Once in TWRP:
    4. Copy backup to PC for safekeeping
 
 ==============================================================================
-  STEP 6: VERIFY THE BATTERY FIX (battfix3-noseed0)
+  STEP 6: VERIFY THE BATTERY FIX (battfix4-firstseed)
 ==============================================================================
 
-The recovery image includes a userspace battery reader. Its current version
-also avoids storing 0 in the MT6358 RTC SOC field, where 0 means "no saved
-value" rather than an empty battery.
+The recovery image includes a userspace battery reader. It now initializes an
+empty/invalid MT6358 RTC SOC seed from the first valid OCV sample, even if the
+kernel capacity happens to be close to the OCV result. It also avoids storing
+0, which this driver treats as "no saved value" rather than an empty battery.
 
 recovery_utils/battery_utils.cpp (TWRP android-12.1) contains:
 
@@ -141,14 +142,15 @@ and skip the health HAL entirely.
 
 1) Main TWRP screen: the version string must read
 
-       3.7.1_12-A14_Tanzanite_battfix3-noseed0
+       3.7.1_12-A14_Tanzanite_battfix4-firstseed
 
    (variables.h concatenates TW_MAIN_VERSION_STR with TW_DEVICE_VERSION, so
-   the marker is the "-A14_Tanzanite_battfix3-noseed0" suffix.)
+   the marker is the "-A14_Tanzanite_battfix4-firstseed" suffix.)
 
    Still showing A14_Tanzanite or A12+_AOSP  -> OLD image, reflash.
-   Showing -A14_Tanzanite_battfix2           -> older image; it may still write
-                                                0 to rtc_ui_soc at empty battery.
+   Showing -A14_Tanzanite_battfix3-noseed0   -> older image; it prevents a zero
+                                                write but may leave an initial
+                                                invalid seed untouched.
 
 2) In TWRP -> Advanced -> Terminal, or via adb shell:
 
@@ -194,13 +196,13 @@ If /tmp/batt/capacity is missing or TWRP shows -1%, the daemon did not start:
 
 The MT6358 driver treats rtc_ui_soc=0 as "no saved value", not as an empty
 battery. It then falls back to a mis-scaled PTIM reading and can boot Android
-at 80% or more. battfix3-noseed0 keeps the computed display at 0%, but writes
-1% as the RTC seed so the next boot takes the valid-seed path. Do not manually
-write 0 to /sys/class/power_supply/mtk-gauge/rtc_ui_soc.
+at 80% or more. battfix4-firstseed initializes a missing RTC seed from the
+computed OCV SOC and stores 1 rather than 0 at an empty display. Do not
+manually write 0 to /sys/class/power_supply/mtk-gauge/rtc_ui_soc.
 
 For the OrangeFox workflow, leave "Enable the tanzanite gauge fix" set to on.
-The resulting image should show the battfix3-noseed0 marker and be named
-vendor_boot_orangefox_tanzanite_battfix3-noseed0.img. Flash it to both
+The resulting image should show the battfix4-firstseed marker and be named
+vendor_boot_orangefox_tanzanite_battfix4-firstseed.img. Flash it to both
 vendor_boot_a and vendor_boot_b, then check the Android level after a reboot
 from recovery. Do not deliberately boot recovery below 40%: this handset can
 hit its voltage cutoff under the recovery boot load. The documented
@@ -288,7 +290,7 @@ Problem: Build fails with missing dependencies
   -> Retry: mka vendorbootimage
 
 Problem: battery still jumps after flashing the recovery fix
-  -> Confirm the version string shows -A14_Tanzanite_battfix3-noseed0.
+  -> Confirm the version string shows -A14_Tanzanite_battfix4-firstseed.
   -> Check whether the daemon is alive and what it computed:
          ps -A | grep battfix
          cat /tmp/batt/capacity

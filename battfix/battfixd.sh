@@ -92,13 +92,12 @@ isnum() {
 # starts at ~83% and can only crawl toward reality. The visible symptom is a
 # phone that "jumps to 87%" right after leaving recovery.
 #
-# Mitigation: every tick, if the kernel's battery/capacity is more than
-# SEED_THRESH above the honest OCV value, push the honest value into
-# rtc_ui_soc. The gauge's own FG interrupt rewrites this register roughly
-# every 3 s, so re-writing every INTERVAL=5 s wins the race most of the time.
-# It is not perfect - the value the gauge freezes at poweroff may still be a
-# kernel one - but it dramatically reduces the window in which a stale 83/100
-# can survive into Android.
+# On first recovery boot, rtc_ui_soc may still be 0 (the driver's "no saved
+# value" sentinel). Seed it from OCV unconditionally: comparing only against
+# battery/capacity is insufficient because that node can coincide with OCV
+# while the zero sentinel still makes Android fall back to bad PTIM. On later
+# ticks, correct stale RTC values or a proven kernel over-report. The gauge's
+# FG interrupt can rewrite this register, so the daemon keeps checking it.
 GAUGE=$PS/mtk-gauge
 SEED_NODE=$GAUGE/rtc_ui_soc
 SEED_THRESH=8            # points of over-report before we push the honest seed
@@ -116,7 +115,9 @@ SEED_WRITTEN=0           # count of successful writes this session
 # OCV curve, which is exactly the "jumps to 80 %+" symptom.
 #
 # So a genuine 0 % must never be written as 0. Storing 1 is a one-point lie
-# that keeps the register valid; storing 0 is a lie worth 82 points.
+# that keeps the register valid; storing 0 is a lie worth 82 points. Also seed
+# any invalid/missing RTC value on the first valid OCV sample, even if the
+# kernel capacity happens to be within SEED_THRESH of the computed SOC.
 SEED_MIN=1
 
 # Take SAMPLES paired (V,I) reads and set the globals V, I, VOC.
@@ -425,28 +426,45 @@ while true; do
 	esac
 
 	# --- push the honest SOC into the gauge seed register -----------------
-	# See the long comment near SEED_NODE above. We only act when the kernel
-	# is provably wrong (over-reports by > SEED_THRESH) and we are not near the
-	# flat top of the curve. Reads back to confirm; the gauge rewrites ~3 s, so
-	# a read-back that does not match does NOT mean the write failed - it means
-	# the FG interrupt already overwrote it, which is exactly why we loop.
-	if [ -n "$SEED_NODE" ] && [ -w "$SEED_NODE" ] && [ "$DISP" -lt "$SEED_CEIL" ]; then
+	# Initialize an invalid RTC seed from the first valid OCV sample. Once the
+	# seed is valid, correct only a proven kernel over-report. A read-back that
+	# changes can mean the FG interrupt overwrote it, so keep checking each tick.
+	if [ -n "$SEED_NODE" ] && [ -w "$SEED_NODE" ]; then
+		RTC_SEED=$(rd "$SEED_NODE")
+		SEED_REASON=
+		if ! isnum "$RTC_SEED" || [ "$RTC_SEED" -lt 1 ] || [ "$RTC_SEED" -gt 100 ]; then
+			SEED_REASON=init
+		fi
+
 		KCAP=$(rd "$BAT/capacity")
+		OFF=
+		RTC_OFF=
 		if isnum "$KCAP"; then
-			# Never store 0 - see the SEED_MIN comment above. Everything is
-			# computed from SEED_VAL, not DISP, so the offset stays consistent
-			# with the value actually written.
+			OFF=$(( KCAP - DISP ))
+		fi
+		if [ -z "$SEED_REASON" ]; then
+			RTC_OFF=$(( RTC_SEED - DISP ))
+			[ "$RTC_OFF" -lt 0 ] && RTC_OFF=$((0 - RTC_OFF))
+			# Initialize invalid seeds at any SOC. A clearly stale RTC value is
+			# also corrected at any SOC; kernel over-report correction stays below
+			# the flat top of the OCV curve.
+			if [ "$RTC_OFF" -gt "$SEED_THRESH" ]; then
+				SEED_REASON=stale
+			elif [ "$DISP" -lt "$SEED_CEIL" ] && isnum "$KCAP" && [ "$OFF" -gt "$SEED_THRESH" ]; then
+				SEED_REASON=overreport
+			fi
+		fi
+
+		if [ -n "$SEED_REASON" ]; then
+			# Never store 0 - see the SEED_MIN comment above.
 			SEED_VAL=$DISP
 			[ "$SEED_VAL" -lt "$SEED_MIN" ] && SEED_VAL=$SEED_MIN
-			OFF=$(( KCAP - SEED_VAL ))
-			if [ "$OFF" -gt "$SEED_THRESH" ]; then
-				if echo "$SEED_VAL" > "$SEED_NODE" 2>/dev/null; then
-					SEED_WRITTEN=$((SEED_WRITTEN + 1))
-					RB=$(rd "$SEED_NODE")
-					echo "  seed $SEED_NODE <- $SEED_VAL (disp=$DISP kernel=$KCAP off=$OFF rb=${RB:-?} w=$SEED_WRITTEN)" >> "$LOG"
-				else
-					echo "  seed write FAILED (perm?)" >> "$LOG"
-				fi
+			if echo "$SEED_VAL" > "$SEED_NODE" 2>/dev/null; then
+				SEED_WRITTEN=$((SEED_WRITTEN + 1))
+				RB=$(rd "$SEED_NODE")
+				echo "  seed $SEED_NODE <- $SEED_VAL (reason=$SEED_REASON disp=$DISP kernel=${KCAP:-?} off=${OFF:-?} rb=${RB:-?} w=$SEED_WRITTEN)" >> "$LOG"
+			else
+				echo "  seed write FAILED (perm?)" >> "$LOG"
 			fi
 		fi
 	fi

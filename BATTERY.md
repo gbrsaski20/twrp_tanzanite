@@ -180,10 +180,18 @@ Uji tanpa HP: `bash battfix/test_smooth.sh` (17 assertion).
 
 ### Seed ke RTC
 
-`battfixd` juga menulis angka jujur ke `mtk-gauge/rtc_ui_soc` setiap tick, tapi
-hanya kalau kernel over-report lebih dari 8 poin dan tampilan masih di bawah 95%
-(di atas itu kurva terlalu datar untuk dikoreksi). Ini yang membuat Android
-mewarisi angka yang benar.
+`battfixd` menulis seed jujur ke `mtk-gauge/rtc_ui_soc`:
+
+- Seed kosong/invalid (0 atau di luar rentang 1–100) selalu diinisialisasi dari
+  sampel OCV valid pertama, termasuk saat kapasitas kernel kebetulan dekat.
+- Seed valid yang berbeda lebih dari 8 poin dari OCV diperbarui.
+- Kapasitas kernel yang over-report lebih dari 8 poin juga dikoreksi selama SOC
+  masih di bawah 95% (di atas itu kurva OCV terlalu datar).
+- SOC hasil hitung 0 disimpan sebagai seed 1 karena driver memakai 0 sebagai
+  sentinel "tidak ada data".
+
+Ini menyiapkan nilai untuk Android setelah recovery. Perubahan v4 menargetkan
+boot pertama setelah flash/recovery, tetapi masih perlu validasi di perangkat.
 
 ---
 

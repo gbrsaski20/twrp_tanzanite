@@ -116,22 +116,21 @@ Kenapa bukan `fox_14.1`: butuh ~85 GB disk (runner GitHub tidak cukup), dan
 tree ini memang berbasis `twrp-12.1`. OrangeFox sendiri menyarankan `fox_12.1`
 untuk ROM Android 12 ke atas.
 
-## Baterai: bug "100% saat masuk recovery"
+## Baterai: persentase loncat saat reboot
 
-Bug paling serius di perangkat ini, dan sudah diperbaiki. Ringkasnya:
+Di recovery, `battfixd.sh` menghitung SOC dari OCV dan menyediakannya lewat
+`/tmp/batt`, yang dibaca karena binary recovery memakai
+`TW_CUSTOM_BATTERY_PATH := "/tmp/batt"`. Daemon juga menyiapkan seed RTC
+`mtk-gauge/rtc_ui_soc` untuk boot Android berikutnya.
 
-- TWRP hanya bisa membaca `battery/capacity`, dan di kernel ini node itu tidak
-  bisa dipakai — driver gauge salah skala ADC sehingga selalu boot dengan
-  keyakinan baterai penuh.
-- `battfixd.sh` menghitung SOC jujur dari OCV dan menulisnya ke `/tmp/batt`,
-  yang dibaca recovery karena binary-nya dikompilasi dengan
-  `TW_CUSTOM_BATTERY_PATH := "/tmp/batt"`.
-- Patch DTB `mtk_gauge` mematikan latch 100% (`KEEP_100_PERCENT`,
-  `g_FG_PSEUDO100*`).
-- `reset_fg_rtc_set` sekali untuk membuang state gauge yang korup.
+Driver MT6358 memperlakukan seed `0` sebagai "tidak ada data". Kode v4
+menginisialisasi seed yang kosong/invalid dari sampel OCV pertama yang valid,
+memperbarui seed yang stale, dan menyimpan `1` saat SOC terhitung 0 agar tidak
+memicu fallback PTIM yang salah skala. Perubahan ini menargetkan loncatan pada
+boot Android pertama setelah masuk recovery; v4 masih perlu diuji di perangkat.
 
-**Ketiganya diperlukan** — patch DTB tidak bisa menolong kalau coulomb counter-nya
-sendiri sudah 100%, dan seed `battfixd` kalah kalau state gauge masih korup.
+Android tetap memakai fuel gauge kernel. Recovery memperbaiki tampilan dan
+menyiapkan seed antar-boot; v4 tidak mengubah skala PTIM di driver kernel.
 
 Detail lengkap, angka pengukuran, dan prosedur perbaikannya ada di
 **[BATTERY.md](BATTERY.md)**.

@@ -34,9 +34,9 @@ on:
           - '12.1'
           - '14.1'
       battery_fix:
-        description: 'Battery patch: on = battfixd + TW_CUSTOM_BATTERY_PATH, off = read the kernel node like Android'
+        description: 'Enable the tanzanite gauge fix (initializes empty RTC SOC seed on first recovery boot)'
         required: true
-        default: 'off'
+        default: 'on'
         type: choice
         options:
           - 'off'
@@ -44,19 +44,15 @@ on:
   push:
     branches: [ main, master ]
     paths:
-      - '.github/workflows/build-orangefox.yml'
       - 'orangefox/**'
-      - 'battfix/**'
 
 env:
   FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
   DEVICE: "tanzanite"
   FOX_BUILD_DEVICE: "tanzanite"
-  # Default off: the gauge was repaired on 2026-10-27 (offset +1), so the
-  # recovery no longer needs to compute its own SOC. A push-triggered run has
-  # no inputs at all, so this fallback decides what a push builds.
-  BATTERY_FIX: ${{ github.event.inputs.battery_fix || 'off' }}
-  IMG_NAME: ${{ github.event.inputs.battery_fix == 'on' && 'vendor_boot_orangefox_tanzanite_battfix.img' || 'vendor_boot_orangefox_tanzanite_stockbatt.img' }}
+  # Keep the recovery-side gauge correction enabled for manual and push builds.
+  BATTERY_FIX: ${{ github.event.inputs.battery_fix || 'on' }}
+  IMG_NAME: ${{ (github.event.inputs.battery_fix || 'on') == 'on' && 'vendor_boot_orangefox_tanzanite_battfix4-firstseed.img' || 'vendor_boot_orangefox_tanzanite_stockbatt.img' }}
 
 # GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
 # softprops/action-gh-release needs contents: write, otherwise 403.
@@ -222,8 +218,8 @@ jobs:
       #
       #   battery_fix=off -> TWRP reads whatever the kernel reports, exactly
       #                      like the ROM does. No daemon, no custom path.
-      #   battery_fix=on  -> the old behaviour: battfixd.sh writes /tmp/batt
-      #                      and TW_CUSTOM_BATTERY_PATH points TWRP at it.
+      #   battery_fix=on  -> battfixd.sh computes OCV SOC, feeds TWRP, and
+      #                      keeps rtc_ui_soc nonzero at an empty display.
       #
       #   If the gauge ever corrupts again, run this workflow with on.
       # ------------------------------------------------------------------
@@ -270,8 +266,11 @@ jobs:
             } >> "$DT/BoardConfig.mk"
           fi
 
+          # Make the no-zero seed fix visible on the recovery UI.
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A14_Tanzanite_battfix4-firstseed/' "$DT/BoardConfig.mk"
+
           echo "=== verification ==="
-          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH' "$DT/BoardConfig.mk"
+          grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
           tail -n 12 "$RC"
 
       # ------------------------------------------------------------------

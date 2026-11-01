@@ -300,6 +300,23 @@ Nilai asli 0% disimpan sebagai **1**. Satu poin bohong, dibanding 82 poin bohong
 tulis 22`; `disp=0/kernel=5 -> tidak menulis`; `disp=96 -> tidak menulis`
 (di atas `SEED_CEIL`).
 
+### 6.5 Lapisan 5 (v4) — inisialisasi seed kosong saat boot recovery pertama
+
+v3 hanya menghindari penulisan nilai 0. Itu belum cukup jika RTC seed memang
+masih 0 tetapi `battery/capacity` kernel kebetulan dekat dengan hasil OCV:
+ambang koreksi lama tidak akan menulis apa pun, dan Android tetap masuk cabang
+`rtcui=0` saat boot berikutnya.
+
+v4 membaca `rtc_ui_soc` setiap tick. Jika nilainya 0 atau di luar rentang 1–100,
+daemon selalu menginisialisasikannya dari SOC OCV pertama yang valid. Untuk seed
+yang sudah valid, seed lama diperbarui jika selisihnya lebih dari 8 poin dari
+SOC OCV, atau jika kapasitas kernel terbukti over-report lebih dari 8 poin.
+Jika hasil OCV benar-benar 0%, nilai seed tetap disimpan sebagai 1.
+
+**[DUGAAN]** Perubahan ini menargetkan loncatan pada boot Android pertama
+setelah flash recovery. Belum ada hasil uji perangkat khusus untuk kondisi
+RTC seed awal kosong dengan kapasitas kernel yang dekat ke OCV.
+
 ---
 
 ## 7. Hasil yang sudah terverifikasi di perangkat
@@ -313,6 +330,7 @@ tulis 22`; `disp=0/kernel=5 -> tidak menulis`; `disp=96 -> tidak menulis`
 | Android stabil di 21% | tidak ada pergerakan anomali ✅ |
 | v2 (filter halus) | creep 1 poin setelah 4 tick, bukan lompat 2 poin ✅ |
 | v3 (jangan simpan 0) | **belum di-flash** ⏳ |
+| v4 (inisialisasi seed kosong pada tick pertama) | **belum di-flash** ⏳ |
 
 ---
 
