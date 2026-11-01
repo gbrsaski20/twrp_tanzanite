@@ -112,11 +112,12 @@ Once in TWRP:
    4. Copy backup to PC for safekeeping
 
 ==============================================================================
-  STEP 6: VERIFY THE BATTERY FIX (A14_Tanzanite_battfix)
+  STEP 6: VERIFY THE BATTERY FIX (battfix3-noseed0)
 ==============================================================================
 
-The first build showed a constant 100% in recovery. The cause was inside TWRP,
-not in the battery itself.
+The recovery image includes a userspace battery reader. Its current version
+also avoids storing 0 in the MT6358 RTC SOC field, where 0 means "no saved
+value" rather than an empty battery.
 
 recovery_utils/battery_utils.cpp (TWRP android-12.1) contains:
 
@@ -140,13 +141,14 @@ and skip the health HAL entirely.
 
 1) Main TWRP screen: the version string must read
 
-       3.7.1_12-A14_Tanzanite_battfix2
+       3.7.1_12-A14_Tanzanite_battfix3-noseed0
 
    (variables.h concatenates TW_MAIN_VERSION_STR with TW_DEVICE_VERSION, so
-   the marker is the "-A14_Tanzanite_battfix2" suffix.)
+   the marker is the "-A14_Tanzanite_battfix3-noseed0" suffix.)
 
    Still showing A14_Tanzanite or A12+_AOSP  -> OLD image, reflash.
-   Showing -A14_Tanzanite_battfix (no "2")   -> first attempt, does NOT work.
+   Showing -A14_Tanzanite_battfix2           -> older image; it may still write
+                                                0 to rtc_ui_soc at empty battery.
 
 2) In TWRP -> Advanced -> Terminal, or via adb shell:
 
@@ -188,12 +190,21 @@ If /tmp/batt/capacity is missing or TWRP shows -1%, the daemon did not start:
    ps -A | grep battfix
    sh /system/bin/battfixd.sh     <- run it by hand to see the error
 
---- About "Android also jumps to 100% after visiting recovery" ----------------
+--- Why the no-zero RTC seed fix matters --------------------------------------
 
-TWRP only READS the gauge, it never writes it, so it cannot change what
-Android reports. If Android shows 100% for a while after leaving recovery,
-that is the fuel gauge re-learning its state on the next boot; it settles by
-itself. It is not caused by the percentage TWRP displayed.
+The MT6358 driver treats rtc_ui_soc=0 as "no saved value", not as an empty
+battery. It then falls back to a mis-scaled PTIM reading and can boot Android
+at 80% or more. battfix3-noseed0 keeps the computed display at 0%, but writes
+1% as the RTC seed so the next boot takes the valid-seed path. Do not manually
+write 0 to /sys/class/power_supply/mtk-gauge/rtc_ui_soc.
+
+For the OrangeFox workflow, leave "Enable the tanzanite gauge fix" set to on.
+The resulting image should show the battfix3-noseed0 marker and be named
+vendor_boot_orangefox_tanzanite_battfix3-noseed0.img. Flash it to both
+vendor_boot_a and vendor_boot_b, then check the Android level after a reboot
+from recovery. Do not deliberately boot recovery below 40%: this handset can
+hit its voltage cutoff under the recovery boot load. The documented
+measurements are from one tanzanite handset.
 
 --- Reset baterai: apa yang bisa dan tidak bisa dilakukan di TWRP -----------
 
@@ -276,8 +287,8 @@ Problem: Build fails with missing dependencies
   -> Run: export ALLOW_MISSING_DEPENDENCIES=true
   -> Retry: mka vendorbootimage
 
-Problem: battery still stuck at 100% after the battfix2 build
-  -> Confirm the version string shows -A14_Tanzanite_battfix2 first.
+Problem: battery still jumps after flashing the recovery fix
+  -> Confirm the version string shows -A14_Tanzanite_battfix3-noseed0.
   -> Check whether the daemon is alive and what it computed:
          ps -A | grep battfix
          cat /tmp/batt/capacity
