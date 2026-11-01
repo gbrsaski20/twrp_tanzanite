@@ -105,6 +105,20 @@ SEED_THRESH=8            # points of over-report before we push the honest seed
 SEED_CEIL=95             # never seed above this; near full the OCV table is flat
 SEED_WRITTEN=0           # count of successful writes this session
 
+# The gauge reads rtc_ui_soc back at boot and has a dedicated branch for the
+# value 0:
+#
+#     [fgr_dod_init]rtcui=0 case,init_swocv=42510,OCV_to_SOC_c=8257
+#
+# Zero does not mean "empty". It means "no value was stored", and the driver
+# then falls back to init_swocv, which is ptim x 10 - a mis-scaled ADC code
+# that reads ~4250 mV while the cell is at ~3700 mV. That maps to 82 % on the
+# OCV curve, which is exactly the "jumps to 80 %+" symptom.
+#
+# So a genuine 0 % must never be written as 0. Storing 1 is a one-point lie
+# that keeps the register valid; storing 0 is a lie worth 82 points.
+SEED_MIN=1
+
 # Take SAMPLES paired (V,I) reads and set the globals V, I, VOC.
 # VOC is the open-circuit voltage in mV; VOC is left EMPTY if nothing usable was
 # read, and the caller must then hold the previous display.
@@ -419,12 +433,17 @@ while true; do
 	if [ -n "$SEED_NODE" ] && [ -w "$SEED_NODE" ] && [ "$DISP" -lt "$SEED_CEIL" ]; then
 		KCAP=$(rd "$BAT/capacity")
 		if isnum "$KCAP"; then
-			OFF=$(( KCAP - DISP ))
+			# Never store 0 - see the SEED_MIN comment above. Everything is
+			# computed from SEED_VAL, not DISP, so the offset stays consistent
+			# with the value actually written.
+			SEED_VAL=$DISP
+			[ "$SEED_VAL" -lt "$SEED_MIN" ] && SEED_VAL=$SEED_MIN
+			OFF=$(( KCAP - SEED_VAL ))
 			if [ "$OFF" -gt "$SEED_THRESH" ]; then
-				if echo "$DISP" > "$SEED_NODE" 2>/dev/null; then
+				if echo "$SEED_VAL" > "$SEED_NODE" 2>/dev/null; then
 					SEED_WRITTEN=$((SEED_WRITTEN + 1))
 					RB=$(rd "$SEED_NODE")
-					echo "  seed $SEED_NODE <- $DISP (kernel=$KCAP off=$OFF rb=${RB:-?} w=$SEED_WRITTEN)" >> "$LOG"
+					echo "  seed $SEED_NODE <- $SEED_VAL (disp=$DISP kernel=$KCAP off=$OFF rb=${RB:-?} w=$SEED_WRITTEN)" >> "$LOG"
 				else
 					echo "  seed write FAILED (perm?)" >> "$LOG"
 				fi
