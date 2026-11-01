@@ -214,7 +214,7 @@ jobs:
 
           # Visible build marker, so we can tell which image is flashed.
           # variables.h concatenates: "3.7.1_12" TW_DEVICE_VERSION
-          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A14_Tanzanite_battfix4-firstseed/' "$DT/BoardConfig.mk"
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A14_Tanzanite_gbrsaski20/' "$DT/BoardConfig.mk"
 
           echo "=== BoardConfig.mk tail ==="
           tail -n 12 "$DT/BoardConfig.mk"

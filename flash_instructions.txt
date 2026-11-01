@@ -142,10 +142,10 @@ and skip the health HAL entirely.
 
 1) Main TWRP screen: the version string must read
 
-       3.7.1_12-A14_Tanzanite_battfix4-firstseed
+       3.7.1_12-A14_Tanzanite_gbrsaski20
 
    (variables.h concatenates TW_MAIN_VERSION_STR with TW_DEVICE_VERSION, so
-   the marker is the "-A14_Tanzanite_battfix4-firstseed" suffix.)
+   the marker is the "-A14_Tanzanite_gbrsaski20" suffix.)
 
    Still showing A14_Tanzanite or A12+_AOSP  -> OLD image, reflash.
    Showing -A14_Tanzanite_battfix3-noseed0   -> older image; it prevents a zero
@@ -201,8 +201,8 @@ computed OCV SOC and stores 1 rather than 0 at an empty display. Do not
 manually write 0 to /sys/class/power_supply/mtk-gauge/rtc_ui_soc.
 
 For the OrangeFox workflow, leave "Enable the tanzanite gauge fix" set to on.
-The resulting image should show the battfix4-firstseed marker and be named
-vendor_boot_orangefox_tanzanite_battfix4-firstseed.img. Flash it to both
+The resulting image should show the gbrsaski20 marker and be named
+vendor_boot_orangefox_tanzanite_gbrsaski20.img. Flash it to both
 vendor_boot_a and vendor_boot_b, then check the Android level after a reboot
 from recovery. Do not deliberately boot recovery below 40%: this handset can
 hit its voltage cutoff under the recovery boot load. The documented
@@ -290,7 +290,7 @@ Problem: Build fails with missing dependencies
   -> Retry: mka vendorbootimage
 
 Problem: battery still jumps after flashing the recovery fix
-  -> Confirm the version string shows -A14_Tanzanite_battfix4-firstseed.
+  -> Confirm the version string shows -A14_Tanzanite_gbrsaski20.
   -> Check whether the daemon is alive and what it computed:
          ps -A | grep battfix
          cat /tmp/batt/capacity

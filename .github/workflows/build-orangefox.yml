@@ -44,6 +44,7 @@ on:
   push:
     branches: [ main, master ]
     paths:
+      - '.github/workflows/build-orangefox.yml'
       - 'orangefox/**'
 
 env:
@@ -52,7 +53,7 @@ env:
   FOX_BUILD_DEVICE: "tanzanite"
   # Keep the recovery-side gauge correction enabled for manual and push builds.
   BATTERY_FIX: ${{ github.event.inputs.battery_fix || 'on' }}
-  IMG_NAME: ${{ (github.event.inputs.battery_fix || 'on') == 'on' && 'vendor_boot_orangefox_tanzanite_battfix4-firstseed.img' || 'vendor_boot_orangefox_tanzanite_stockbatt.img' }}
+  IMG_NAME: ${{ (github.event.inputs.battery_fix || 'on') == 'on' && 'vendor_boot_orangefox_tanzanite_gbrsaski20.img' || 'vendor_boot_orangefox_tanzanite_stockbatt.img' }}
 
 # GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
 # softprops/action-gh-release needs contents: write, otherwise 403.
@@ -267,7 +268,7 @@ jobs:
           fi
 
           # Make the no-zero seed fix visible on the recovery UI.
-          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A14_Tanzanite_battfix4-firstseed/' "$DT/BoardConfig.mk"
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A14_Tanzanite_gbrsaski20/' "$DT/BoardConfig.mk"
 
           echo "=== verification ==="
           grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
