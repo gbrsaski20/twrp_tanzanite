@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # Bridge OrangeFox's brightness-file UI to the MT6789 flashlight switch.
 # The driver exposes mt6789_flash (0=off, 1=on), not an LED brightness node.
+# Its store handler treats a standalone newline as "on", so write no newline.
 
 NODE=/sys/devices/platform/flashlights_mt6789/mt6789_flash
 CONTROL_DIR=/tmp/flashlight
@@ -13,7 +14,7 @@ printf '0\n' > "$BRIGHTNESS"
 
 # Make sure the torch starts off when recovery starts.
 if [ -e "$NODE" ]; then
-	printf '0\n' > "$NODE" 2>/dev/null
+	printf '%s' '0' > "$NODE" 2>/dev/null
 fi
 
 last=''
@@ -25,7 +26,7 @@ while :; do
 	esac
 
 	if [ "$value" != "$last" ] && [ -e "$NODE" ]; then
-		if printf '%s\n' "$value" > "$NODE" 2>/dev/null; then
+		if printf '%s' "$value" > "$NODE" 2>/dev/null; then
 			last="$value"
 		fi
 	fi
