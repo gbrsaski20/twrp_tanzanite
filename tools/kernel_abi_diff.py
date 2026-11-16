@@ -110,6 +110,13 @@ def main():
     print("A: %s" % banner(ka))
     print("B: %s" % banner(kb))
 
+    # Fitur yang sering diklaim di changelog: cek langsung di binary-nya.
+    def feats(k):
+        return "KSU:%s SUSFS:%s" % ("ya" if b"KernelSU" in k or b"kernelsu" in k else "tidak",
+                                    "ya" if k.count(b"susfs") > 3 else "tidak")
+    print("A fitur: %s" % feats(ka))
+    print("B fitur: %s" % feats(kb))
+
     A, B = pick(embedded_config(ka)), pick(embedded_config(kb))
     rows = [(k, A.get(k, "-"), B.get(k, "-")) for k in sorted(set(A) | set(B))
             if A.get(k, "-") != B.get(k, "-")]
