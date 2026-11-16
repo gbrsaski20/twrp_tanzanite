@@ -28,13 +28,18 @@ ABI_KEYS = (
     "LOCALVERSION", "KSU",
 )
 
-# Beda di opsi ini mengubah layout struct / daftar simbol -> CRC modul berubah.
-FATAL = ("LTO_CLANG_FULL", "CFI_FORCE_SKIP_CHECK", "TRIM_UNUSED_KSYMS",
-         "MODVERSIONS", "STACKPROTECTOR_PER_TASK", "RANDSTRUCT", "MODULE_SIG",
-         "MODULE_FORCE", "KSU")
+# Beda di opsi ini mengubah layout struct / hash tipe -> CRC modul berubah.
+FATAL = ("MODVERSIONS", "STACKPROTECTOR_PER_TASK", "RANDSTRUCT",
+         "MODULE_SIG_FORCE", "KSU")
 
-# Beda di opsi ini tidak mengubah CRC: cuma string versi / path whitelist.
-INFO = ("LOCALVERSION", "UNUSED_KSYMS_WHITELIST", "CLANG_VERSION", "GCC_VERSION")
+# Bisa ikut memutus modul, tapi tidak selalu: perlu dibuktikan dari dmesg.
+WARN = ("LTO_CLANG_FULL", "CFI_FORCE_SKIP_CHECK", "CLANG_VERSION", "GCC_VERSION")
+
+# Beda di opsi ini TIDAK mengubah CRC: string versi, path whitelist, dan
+# TRIM_UNUSED_KSYMS (hanya memangkas simbol yang tidak dipakai siapa pun,
+# CRC simbol yang tersisa tetap sama).
+INFO = ("LOCALVERSION", "UNUSED_KSYMS_WHITELIST", "TRIM_UNUSED_KSYMS",
+        "INIT_ON_ALLOC", "MODULE_UNLOAD")
 
 PAT = re.compile(r"CONFIG_(%s)[A-Z0-9_]*\b.*" % "|".join(ABI_KEYS))
 
@@ -111,8 +116,10 @@ def main():
         return 0
 
     fatal = [k for k, _, _ in rows if any(x in k for x in FATAL)]
-    info = [k for k, _, _ in rows if k not in fatal and any(x in k for x in INFO)]
-    other = [k for k, _, _ in rows if k not in fatal and k not in info]
+    warn = [k for k, _, _ in rows if k not in fatal and any(x in k for x in WARN)]
+    info = [k for k, _, _ in rows if k not in fatal and k not in warn
+            and any(x in k for x in INFO)]
+    other = [k for k, _, _ in rows if k not in fatal and k not in warn and k not in info]
 
     if fatal:
         print("ABI: TIDAK KMI-compliant. %d opsi yang mengubah CRC/layout:" % len(fatal))
@@ -120,16 +127,21 @@ def main():
             print("  - %s" % k)
         print("\nKesimpulan: modul vendor (lib/modules di vendor_boot) akan DITOLAK")
         print("kernel ini. Minta pembuat kernel menyamakan opsi di atas dengan kernel")
-        print("stok (LTO thin, tanpa CFI_FORCE_SKIP_CHECK, TRIM_UNUSED_KSYMS +")
-        print("whitelist sama), atau minta folder lib/modules hasil build-nya.")
-        return 0
+        print("stok, atau minta folder lib/modules hasil build-nya.")
+    elif warn:
+        print("ABI: belum pasti. Tidak ada opsi layout yang beda, tapi ada:")
+        for k in warn:
+            print("  - %s" % k)
+        print("\nCoba flash; kalau recovery mati, ambil /tmp/pstore.log (pstore-dump)")
+        print("untuk melihat simbol mana yang ditolak.")
+    else:
+        print("ABI: aman. Tidak ada opsi yang mengubah CRC/layout, jadi modul")
+        print("stok tetap diterima walau versi kernel berbeda.")
 
-    print("ABI: tidak ada opsi yang mengubah CRC. Modul stok seharusnya tetap")
-    print("diterima walau versi kernel berbeda.")
     if info:
-        print("Beda yang aman (cuma string/path): %s" % ", ".join(info))
+        print("Beda yang aman (string/path/daftar ekspor): %s" % ", ".join(info))
     if other:
-        print("Beda lain yang perlu dilihat: %s" % ", ".join(other[:8]))
+        print("Beda lain (tidak menyangkut modul): %s" % ", ".join(other[:8]))
     return 0
 
 

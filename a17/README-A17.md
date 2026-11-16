@@ -296,6 +296,15 @@ berbeda; ditambah CFI skip-check dan daftar simbol yang tidak di-trim, modul
 A17 pasti ditolak. Jadi ini bukan soal "GKI atau bukan", tapi soal build-nya
 KMI-compliant atau tidak.
 
+### Root tanpa merusak KMI
+
+Kalau butuh root tapi tetap mau recovery jalan: pakai kernel **vanilla**
+(tanpa patch KSU/SUSFS di dalam kernel), lalu pasang **KernelSU mode LKM**
+(`ksud` memuat `kernelsu.ko` di late-load). Kernel tidak diubah sama sekali,
+jadi modul vendor tetap cocok. SUSFS tetap butuh patch kernel, jadi pilihannya:
+root tanpa SUSFS (LKM) **atau** kernel ter-patch yang konsekuensinya recovery
+harus dirakit ulang dengan modul dari kernel itu.
+
 ### Kalau recovery tetap tidak mau boot: ambil log pstore
 
 Kernel stok maupun Scalar-Abaddon sama-sama punya `CONFIG_PSTORE_RAM`, jadi
