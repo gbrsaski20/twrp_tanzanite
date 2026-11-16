@@ -26,6 +26,7 @@ on:
       - '.github/workflows/build.yml'
       - 'local_manifests/**'
       - 'battfix/**'
+      - 'a17/**'
 
 # GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
 # softprops/action-gh-release needs contents: write, otherwise it fails
@@ -235,6 +236,60 @@ jobs:
           ls -lh "$MODDIR/flashlight.ko" "$MODDIR/flashlights-mt6789-o7.ko"
           echo "=== verification ==="
           grep -n 'TW_USE_LEGACY_BATTERY_SERVICES\|TW_CUSTOM_BATTERY_PATH\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
+
+      # ------------------------------------------------------------------
+      # STEP 6.6: Patch device tree - Android 17 (Halcyon) crypto support
+      # ------------------------------------------------------------------
+      # ROM Android 17 memakai:
+      #   - /data  : FBE v2 + inlinecrypt_optimized, keydirectory=/metadata/...
+      #   - keymint AIDL V3/V4 (vendor A17 punya keymint-V3-ndk-v35 / -V4-ndk)
+      #   - modul kernel dari build kernel A17 (mitee.ko/tee.ko wajib match)
+      # Tree upstream masih memakai fstab + flag era Android 14, sehingga
+      # /metadata tidak bisa dibuka -> /data gagal di-decrypt.
+      # ------------------------------------------------------------------
+      - name: Patch device tree (A17 crypto)
+        run: |
+          set -e
+          DT=twrp-build/device/xiaomi/tanzanite
+
+          # 1. fstab A17 (metadata encryption + FBE v2, persis dari vendor_boot A17)
+          cp -v a17/fstab.mt6789 "$DT/recovery/root/first_stage_ramdisk/fstab.mt6789"
+
+          # 2. init recovery: trigger keymint via servicemanager + daemon diagnostik
+          cp -v a17/root/init.recovery.mt6789.rc "$DT/recovery/root/init.recovery.mt6789.rc"
+
+          # 3. daemon diagnostik kripto (/tmp/crypto-diag.log, pull lewat adb)
+          mkdir -p "$DT/recovery/root/system/bin"
+          cp -v a17/root/system/bin/crypto-diag.sh "$DT/recovery/root/system/bin/crypto-diag.sh"
+          chmod 0755 "$DT/recovery/root/system/bin/crypto-diag.sh"
+          sh -n "$DT/recovery/root/system/bin/crypto-diag.sh"
+          echo "crypto-diag.sh syntax: OK"
+
+          # 4. flag BoardConfig khusus A17
+          if grep -q 'A17 crypto' "$DT/BoardConfig.mk"; then
+            echo "flag A17 sudah ada."
+          else
+            printf '\n# --- A17 crypto (lihat a17/boardconfig-a17.mk) ---\n' >> "$DT/BoardConfig.mk"
+            cat a17/boardconfig-a17.mk >> "$DT/BoardConfig.mk"
+          fi
+
+          # 5. kalau stack TEE A17 sudah di-pull (tools/pull_a17_stack.sh),
+          #    pakai itu untuk menggantikan prebuilt era A14 di ramdisk.
+          if [ -d a17/prebuilt/vendor ] && [ -n "$(ls -A a17/prebuilt/vendor 2>/dev/null)" ]; then
+            echo "=== memakai stack TEE/keymint dari ROM A17 ==="
+            cp -rv a17/prebuilt/vendor/. "$DT/recovery/root/vendor/"
+            ls -l "$DT/recovery/root/vendor/bin/hw/"
+          else
+            echo "catatan: a17/prebuilt/vendor kosong - masih memakai prebuilt A14."
+            echo "         Jalankan tools/pull_a17_stack.sh dari TWRP untuk melengkapinya."
+          fi
+
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A17_Tanzanite_gbrsaski20/' "$DT/BoardConfig.mk"
+
+          echo "=== verifikasi ==="
+          grep -n 'TW_INCLUDE_FBE_METADATA_DECRYPT\|TW_USE_FSCRYPT_POLICY\|TW_FORCE_KEYMASTER_VER\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
+          head -3 "$DT/recovery/root/first_stage_ramdisk/fstab.mt6789"
+          grep -n 'crypto-diag\|servicemanager.ready' "$DT/recovery/root/init.recovery.mt6789.rc"
 
       # ------------------------------------------------------------------
       # STEP 7: Setup build environment

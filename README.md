@@ -7,7 +7,7 @@
 [![Build TWRP](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build.yml/badge.svg)](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build.yml)
 [![Build OrangeFox](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build-orangefox.yml/badge.svg)](https://github.com/gbrsaski20/twrp_tanzanite/actions/workflows/build-orangefox.yml)
 [![Device](https://img.shields.io/badge/device-tanzanite-2ea44f)](https://github.com/gbrsaski20/twrp_tanzanite)
-[![Android](https://img.shields.io/badge/Android-14-3ddc84?logo=android&logoColor=white)](https://www.android.com/)
+[![Android](https://img.shields.io/badge/Android-14%20%2F%2017-3ddc84?logo=android&logoColor=white)](https://www.android.com/)
 
 </div>
 
@@ -35,6 +35,33 @@ Build recovery `vendor_boot.img` untuk **Xiaomi Redmi Note 14 4G** langsung mela
 
 Image recovery berada di partisi `vendor_boot`. Ikuti langkah dan perintah khusus perangkat di **[flash_instructions.txt](flash_instructions.txt)**. Jangan menebak nama partisi atau memakai image dari workflow lain. Setelah flash, reboot langsung ke recovery untuk memastikan image terpasang.
 
+## Dukungan Android 17 (dekripsi)
+
+ROM Android 17 (mis. `ota-halcyon_tanzanite-17.0-...`, SDK 37) memakai
+`/data` FBE v2 + `inlinecrypt_optimized`, `keydirectory=/metadata/vold/metadata_encryption`,
+keymint AIDL V3/V4, dan TA TEE baru (OTA ikut mem-flash partisi `tee`).
+
+Patch A17 di repo ini:
+
+| File | Isi |
+| --- | --- |
+| `a17/fstab.mt6789` | fstab first-stage persis dari `vendor_boot` A17 |
+| `a17/boardconfig-a17.mk` | flag kripto: `TW_INCLUDE_FBE_METADATA_DECRYPT`, `TW_USE_FSCRYPT_POLICY=2`, dst. |
+| `a17/root/init.recovery.mt6789.rc` | keymint dipicu dari `servicemanager.ready`, plus `crypto-diag` |
+| `a17/root/system/bin/crypto-diag.sh` | tulis `/tmp/crypto-diag.log` untuk diagnosis |
+| `tools/repack_vendor_boot.py` | rakit `vendor_boot` recovery di atas basis A17 (fstab + 217 modul A17) |
+| `tools/pull_a17_stack.sh` | tarik stack TEE/keymint dari ROM A17 di HP ke `a17/prebuilt/vendor/` |
+
+Workflow TWRP menjalankan langkah **Patch device tree (A17 crypto)** otomatis.
+Analisis lengkap, urutan pengerjaan, dan batasannya ada di
+**[a17/README-A17.md](a17/README-A17.md)**.
+
+Setelah flash, ambil bukti dekripsi dengan:
+
+```
+adb pull /tmp/crypto-diag.log
+```
+
 ## Penyesuaian baterai
 
 Recovery menyertakan `battfixd`, yang menghitung perkiraan SOC dari tegangan dan arus baterai, menampilkan nilainya di recovery, serta menyiapkan seed RTC untuk boot Android berikutnya. Perubahan ini ditujukan untuk kasus persentase baterai meloncat setelah reboot dari recovery.
@@ -50,7 +77,7 @@ Perbaikan ini masih perlu validasi di perangkat, terutama pada boot sistem perta
 | Perangkat | Xiaomi Redmi Note 14 4G |
 | Codename | `tanzanite` |
 | Chipset | MediaTek Helio G99 Ultra · MT6789 |
-| Platform | Android 14 · vendor boot v4 |
+| Platform | Android 14 / 17 · vendor boot v4 |
 | Recovery | TWRP 12.1 / OrangeFox R12.0 |
 
 ## Sumber upstream
