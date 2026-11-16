@@ -58,6 +58,12 @@ def main():
     ap.add_argument("--fstab", required=True, help="fstab.mt6789 dari A17")
     ap.add_argument("--init-append", default="",
                     help="fragmen init tambahan (a17/init.append.rc)")
+    ap.add_argument("--modules-from", default="",
+                    help="folder berisi .ko dari kernel lain (kernel custom). "
+                         "Menggantikan seluruh lib/modules/*.ko di ramdisk.")
+    ap.add_argument("--keep-extra-modules", action="store_true",
+                    help="dengan --modules-from: modul lama yang tidak ada di "
+                         "folder sumber tetap dipakai (mis. flashlight.ko)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -116,6 +122,66 @@ def main():
             rec_entries.insert(-1, m)
             added += 1
     print("modul A17  : %d diganti, %d ditambah" % (replaced, added))
+
+    # --- 2b. ganti seluruh modul dengan milik kernel lain -------------------
+    # Modul vendor terikat ke kernel yang jalan (vermagic + versi simbol).
+    # Kalau user memakai kernel custom, modul A17 tidak bisa dipakai; kasih
+    # folder modul hasil build kernel itu lewat --modules-from.
+    if args.modules_from:
+        src = os.path.abspath(args.modules_from)
+        if not os.path.isdir(src):
+            sys.exit("--modules-from bukan folder: %s" % src)
+        new_mods = []
+        for root, _, files in os.walk(src):
+            for fn in files:
+                if not fn.endswith(".ko"):
+                    continue
+                p = os.path.join(root, fn)
+                rel = os.path.relpath(p, src).replace("\\", "/")
+                if not rel.startswith("lib/modules/"):
+                    rel = "lib/modules/" + rel
+                new_mods.append((rel, open(p, "rb").read()))
+        if not new_mods:
+            sys.exit("tidak ada .ko di %s" % src)
+
+        drop = [n for n in rec_idx if n.startswith("lib/modules/") and n.endswith(".ko")]
+        if args.keep_extra_modules:
+            have = {n for n, _ in new_mods}
+            drop = [n for n in drop if n in have]
+        for n in drop:
+            rec_entries = [e for e in rec_entries if e["name"] != n]
+        rec_idx = index(rec_entries)
+        for name, body in new_mods:
+            if name in rec_idx:
+                rec_idx[name]["body"] = body
+            else:
+                rec_entries.insert(-1, make_entry(name, body, mode=0o100644))
+        print("modul baru : %d .ko dari %s (%d modul lama dibuang)"
+              % (len(new_mods), args.modules_from, len(drop)))
+        load = rec_idx.get("lib/modules/modules.load.recovery")
+        if load is not None:
+            have = {n.rsplit("/", 1)[-1] for n, _ in new_mods}
+            need = [l.strip() for l in load["body"].decode().splitlines()
+                    if l.strip() and not l.strip().startswith("#")]
+            missing = [n for n in need if n not in have]
+            if missing:
+                print("  PERINGATAN modules.load.recovery menyebut %d modul yang "
+                      "tidak ada di set baru, contoh: %s"
+                      % (len(missing), ", ".join(missing[:5])))
+
+    # vermagic modul yang akhirnya dipakai (buat dicocokkan dengan `uname -r`)
+    vm = {}
+    for e in rec_entries:
+        if e["name"].startswith("lib/modules/") and e["name"].endswith(".ko"):
+            i = e["body"].find(b"vermagic=")
+            if i >= 0:
+                s = e["body"][i + 9:e["body"].find(b"\0", i)].decode("utf-8", "replace")
+                vm[s] = vm.get(s, 0) + 1
+    if vm:
+        print("vermagic   : %d variasi" % len(vm))
+        for s, n in sorted(vm.items(), key=lambda kv: -kv[1])[:4]:
+            print("             %-64s %3d modul" % (s, n))
+        print("             harus cocok dengan kernel di boot.img (`uname -r`)")
 
     # modul yang ada di TWRP tapi tidak ada di A17 (mis. mtk-afe-external.ko)
     keep = [n for n in rec_idx if n.startswith("lib/modules/")

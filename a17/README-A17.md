@@ -205,7 +205,66 @@ kalau mau logo lain — tidak perlu ubah script.
 Kedua workflow menjalankan step **Brand About page** (`BRAND_NAME` /
 `BRAND_URL` di blok `env`), jadi image hasil CI otomatis sudah ber-branding.
 
-## 8. Batasan
+## 8. Ganti kernel: kenapa recovery bisa tidak boot
+
+Recovery di perangkat ini tinggal di **vendor_boot**, dan file itu **tidak
+berisi kernel** — kernel ada di `boot.img`. Yang dibawa vendor_boot adalah
+ramdisk recovery + `lib/modules/*.ko` (217 modul A17).
+
+Modul vendor terikat erat ke kernel yang jalan: `vermagic` harus sama dan
+versi simbol (`CONFIG_MODVERSIONS`) harus cocok. Kalau kernel diganti dengan
+build lain, modul A17 tidak bisa dipakai — kernel tetap hidup, tapi driver
+layar/touch/storage tidak ada, jadi recovery berhenti sebelum UI tampil
+(layar hitam atau balik ke fastboot). Ini bukan kerusakan image recovery.
+
+Cek cepat sebelum flash:
+
+```
+python3 tools/kernel_info.py --boot boot.img --vendor-boot vendor_boot.img
+```
+
+Contoh nyata (kernel custom Scalar-Abaddon):
+
+| Sumber | Versi |
+| --- | --- |
+| `boot.img` stok A17 | `5.10.269-HayaseYuuka-MillenniumTeam-android12-9+` |
+| modul di vendor_boot A17 | `5.10.236-android12-9-ge12d1b86a99e` |
+| kernel Scalar-Abaddon | `5.10.272-Scalar-Abaddon-SUSFS-android12-9-ga4b563bf9124` |
+
+Modul A17 masih diterima kernel stok (angkanya beda tapi sumber/config MTK-nya
+sama). Kernel custom yang menambah patch besar (SUSFS/KernelSU) mengubah
+simbol, jadi modul A17 ditolak.
+
+Kalau punya modul dari kernel custom itu (folder hasil build kernel, atau
+`modules/system/lib/modules/` dari zip AnyKernel3 yang menyertakannya):
+
+```
+MODULES=/path/ke/modul ./tools/rebuild_a17.sh ofox vendor_boot_a17.img \
+    OrangeFox-lama.img out.img
+```
+
+atau langsung:
+
+```
+python3 tools/repack_vendor_boot.py --base-a17 vendor_boot_a17.img \
+    --recovery OrangeFox-lama.img --overlay a17/root --fstab a17/fstab.mt6789 \
+    --init-append a17/init.append.rc \
+    --modules-from /path/ke/modul --keep-extra-modules --out out.img
+```
+
+`--keep-extra-modules` menahan modul yang tidak ada di folder sumber
+(mis. `flashlight.ko`, `flashlights-mt6789-o7.ko` yang dipakai patch
+flashlight). Tanpa flag itu semua `.ko` lama dibuang.
+
+Kalau kernel custom tidak menyertakan modul sama sekali (contoh: Scalar-Abaddon,
+`do.modules=0` dan folder `modules/` kosong), **tidak ada cara** membuat
+recovery jalan dengan kernel itu — modulnya harus diminta ke pembuat kernel.
+Selama belum ada, pakai `boot.img` stok untuk masuk recovery.
+
+Catatan: di ROM Axion dulu kernel bebas diganti karena recovery-nya dibangun
+dari source kernel yang sama, sehingga modul di vendor_boot ikut cocok.
+
+## 9. Batasan
 
 - TWRP A17 sudah diuji di perangkat: dekripsi `/data` berhasil. Perbaikan
   OrangeFox di bagian 5 diverifikasi dari sisi image (wiring init, isi

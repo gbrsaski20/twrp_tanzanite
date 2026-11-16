@@ -10,6 +10,15 @@
 # Argumen 1 hanya menentukan nama file default kalau argumen 4 dikosongkan.
 # Semua langkahnya sama untuk TWRP dan OrangeFox: fstab A17, 217 modul A17,
 # fragmen init A17, crypto-diag.sh, format-data.sh.
+#
+# Kernel custom:
+#   Modul vendor di ramdisk HARUS berasal dari kernel yang sama dengan yang ada
+#   di boot.img (vermagic + versi simbol). Kalau memakai kernel custom, kasih
+#   foldernya lewat env MODULES:
+#
+#     MODULES=/path/ke/modul-hasil-build ./tools/rebuild_a17.sh ofox ...
+#
+#   Folder itu boleh berisi .ko langsung atau struktur lib/modules/... .
 # =============================================================================
 set -eu
 
@@ -20,12 +29,20 @@ OUT=${4:-vendor_boot_${KIND}_tanzanite_a17.img}
 
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 
+ARGS=""
+if [ -n "${MODULES:-}" ]; then
+    ARGS="--modules-from $MODULES"
+    echo "modul      : dari $MODULES (bukan modul A17)"
+fi
+
+# shellcheck disable=SC2086
 python3 "$HERE/tools/repack_vendor_boot.py" \
     --base-a17 "$BASE" \
     --recovery "$REC" \
     --overlay "$HERE/a17/root" \
     --fstab "$HERE/a17/fstab.mt6789" \
     --init-append "$HERE/a17/init.append.rc" \
+    $ARGS \
     --out "$OUT"
 
 echo
