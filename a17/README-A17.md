@@ -266,6 +266,36 @@ recovery jalan dengan kernel itu — modulnya harus diminta ke pembuat kernel
 (folder `lib/modules` hasil build kernel). Selama belum ada, pakai `boot.img`
 stok untuk masuk recovery.
 
+### "Kernel saya GKI" belum cukup: harus KMI-compliant
+
+GKI menjamin modul vendor tetap jalan **asal build kernelnya mengikuti aturan
+KMI**: LTO thin, CFI tidak diakali, versi clang/genksyms sama, dan daftar
+simbol ekspor (`TRIM_UNUSED_KSYMS` + whitelist) sama dengan kernel stok.
+Kalau salah satu dilanggar, CRC simbol berubah dan modul vendor ditolak
+walaupun kernelnya turunan GKI `android12-5.10`.
+
+Cek cepat dua kernel (config IKCONFIG dibaca langsung dari image):
+
+```
+python3 tools/kernel_abi_diff.py --a boot_stok.img --b kernel_custom.zip
+```
+
+Contoh hasil nyata (stok 5.10.269 vs Scalar-Abaddon 5.10.272):
+
+| Opsi | Stok | Abaddon |
+| --- | --- | --- |
+| `CONFIG_LTO_CLANG_THIN` | `y` | – |
+| `CONFIG_LTO_CLANG_FULL` | – | `y` |
+| `CONFIG_CFI_FORCE_SKIP_CHECK` | – | `y` |
+| `CONFIG_CLANG_VERSION` | `120005` (12.0.5) | `230001` (23.0.1) |
+| `CONFIG_TRIM_UNUSED_KSYMS` | `y` | – |
+| `CONFIG_UNUSED_KSYMS_WHITELIST` | ada | – |
+
+LTO thin→full dan ganti clang sudah cukup membuat genksyms menghasilkan CRC
+berbeda; ditambah CFI skip-check dan daftar simbol yang tidak di-trim, modul
+A17 pasti ditolak. Jadi ini bukan soal "GKI atau bukan", tapi soal build-nya
+KMI-compliant atau tidak.
+
 ### Kalau recovery tetap tidak mau boot: ambil log pstore
 
 Kernel stok maupun Scalar-Abaddon sama-sama punya `CONFIG_PSTORE_RAM`, jadi
