@@ -13,3 +13,9 @@
 *.bat       text eol=crlf
 *.cmd       text eol=crlf
 *.ps1       text eol=crlf
+
+# Android device files: init/fstab/scripts must be LF in the blob
+# (CRLF breaks init.rc parsing, fstab flags and shebang).
+a17/**     text eol=lf
+*.mt6789   text eol=lf
+*.rc       text eol=lf
