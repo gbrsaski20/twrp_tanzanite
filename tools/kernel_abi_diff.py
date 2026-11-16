@@ -28,18 +28,26 @@ ABI_KEYS = (
     "LOCALVERSION", "KSU",
 )
 
-# Beda di opsi ini mengubah layout struct / hash tipe -> CRC modul berubah.
-FATAL = ("MODVERSIONS", "STACKPROTECTOR_PER_TASK", "RANDSTRUCT",
-         "MODULE_SIG_FORCE", "KSU")
+# Tingkatan berdasarkan bukti di perangkat (tanzanite, A17):
+#   fatal   : hampir pasti mengubah layout struct / CRC simbol
+#   suspect : sering memutus modul, tapi tidak selalu -> harus dites
+#   info    : terbukti / secara teori tidak mengubah CRC
+FATAL_KEYS = ("MODVERSIONS", "RANDSTRUCT", "STACKPROTECTOR_PER_TASK",
+              "MODULE_SIG_FORCE")
+SUSPECT_KEYS = ("SUSFS", "KSU_SAMSUNG", "LTO_CLANG_FULL", "LTO_CLANG_THIN",
+                "CFI_FORCE_SKIP_CHECK", "CLANG_VERSION", "GCC_VERSION")
 
-# Bisa ikut memutus modul, tapi tidak selalu: perlu dibuktikan dari dmesg.
-WARN = ("LTO_CLANG_FULL", "CFI_FORCE_SKIP_CHECK", "CLANG_VERSION", "GCC_VERSION")
 
-# Beda di opsi ini TIDAK mengubah CRC: string versi, path whitelist, dan
-# TRIM_UNUSED_KSYMS (hanya memangkas simbol yang tidak dipakai siapa pun,
-# CRC simbol yang tersisa tetap sama).
-INFO = ("LOCALVERSION", "UNUSED_KSYMS_WHITELIST", "TRIM_UNUSED_KSYMS",
-        "INIT_ON_ALLOC", "MODULE_UNLOAD")
+def classify(key):
+    k = key.replace("CONFIG_", "")
+    if k in FATAL_KEYS:
+        return "fatal"
+    if any(x in k for x in SUSPECT_KEYS):
+        return "suspect"
+    # CONFIG_KSU saja (tanpa SUSFS/Samsung) terbukti aman: SuiKernel
+    # KernelSU-Next 5.10.270 bisa boot ke OFox dengan modul stok.
+    return "info"
+
 
 PAT = re.compile(r"CONFIG_(%s)[A-Z0-9_]*\b.*" % "|".join(ABI_KEYS))
 
@@ -115,33 +123,31 @@ def main():
         print("ABI: tidak ada opsi ABI yang beda -> modul stok seharusnya diterima.")
         return 0
 
-    fatal = [k for k, _, _ in rows if any(x in k for x in FATAL)]
-    warn = [k for k, _, _ in rows if k not in fatal and any(x in k for x in WARN)]
-    info = [k for k, _, _ in rows if k not in fatal and k not in warn
-            and any(x in k for x in INFO)]
-    other = [k for k, _, _ in rows if k not in fatal and k not in warn and k not in info]
+    fatal = [k for k, _, _ in rows if classify(k) == "fatal"]
+    suspect = [k for k, _, _ in rows if classify(k) == "suspect"]
+    info = [k for k, _, _ in rows if classify(k) == "info"]
 
     if fatal:
-        print("ABI: TIDAK KMI-compliant. %d opsi yang mengubah CRC/layout:" % len(fatal))
+        print("ABI: TIDAK KMI-compliant. %d opsi yang mengubah layout/CRC:" % len(fatal))
         for k in fatal:
             print("  - %s" % k)
-        print("\nKesimpulan: modul vendor (lib/modules di vendor_boot) akan DITOLAK")
-        print("kernel ini. Minta pembuat kernel menyamakan opsi di atas dengan kernel")
-        print("stok, atau minta folder lib/modules hasil build-nya.")
-    elif warn:
-        print("ABI: belum pasti. Tidak ada opsi layout yang beda, tapi ada:")
-        for k in warn:
+        print("\nKesimpulan: modul vendor (lib/modules di vendor_boot) akan DITOLAK.")
+        print("Minta pembuat kernel menyamakan opsi itu dengan kernel stok, atau")
+        print("minta folder lib/modules hasil build-nya.")
+    elif suspect:
+        print("ABI: perlu dites. Tidak ada opsi layout yang beda, tapi ada:")
+        for k in suspect:
             print("  - %s" % k)
-        print("\nCoba flash; kalau recovery mati, ambil /tmp/pstore.log (pstore-dump)")
-        print("untuk melihat simbol mana yang ditolak.")
+        print("\nSUSFS/LTO full/CFI skip adalah tersangka utama kalau modul ditolak")
+        print("(KSU saja terbukti aman: SuiKernel KernelSU-Next boot di tanzanite).")
+        print("Kalau recovery mati: ambil /tmp/pstore.log (service pstore-dump).")
     else:
         print("ABI: aman. Tidak ada opsi yang mengubah CRC/layout, jadi modul")
         print("stok tetap diterima walau versi kernel berbeda.")
 
     if info:
-        print("Beda yang aman (string/path/daftar ekspor): %s" % ", ".join(info))
-    if other:
-        print("Beda lain (tidak menyangkut modul): %s" % ", ".join(other[:8]))
+        print("Beda yang aman (string/path/daftar ekspor/KSU saja): %s"
+              % ", ".join(info))
     return 0
 
 
