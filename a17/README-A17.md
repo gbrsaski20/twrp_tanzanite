@@ -3,6 +3,10 @@
 Catatan teknis untuk dukungan dekripsi FBE pada ROM **Android 17** (Halcyon
 `ota-halcyon_tanzanite-17.0-...`, SDK 37, build `CP2A.260605.016`).
 
+**Status:** TWRP A17 sudah diuji di perangkat — dekripsi `/data` **berhasil**
+(16 Nov 2026). Image OrangeFox dirakit dengan langkah yang sama
+(`tools/rebuild_a17.sh ofox ...`).
+
 ## 1. Apa yang dibaca ROM A17 (hasil dump)
 
 Sumber: `vendor_boot.img` Halcyon A17 + `payload.bin` OTA A17 (partisi `vendor`).
@@ -55,7 +59,10 @@ Yang **tidak cocok**:
 - `a17/root/system/bin/crypto-diag.sh` → menulis `/tmp/crypto-diag.log`:
   properti kripto, mount, modul TEE, status service HAL, potongan
   logcat/dmesg.
-- `a17/root/system/bin/format-data.sh` → format `/data` manual (lihat bagian 5).
+- `a17/root/system/bin/crypto-hal-start.sh` → menyalakan ulang
+  tee-supplicant/keymint/gatekeeper dengan retry (`/tmp/crypto-hal.log`),
+  karena service HAL di rc bersifat `disabled` + `oneshot`.
+- `a17/root/system/bin/format-data.sh` → format `/data` manual (lihat bagian 4).
 - `tools/repack_vendor_boot.py` → merakit `vendor_boot` recovery di atas
   basis `vendor_boot` A17: fstab A17 + **217 modul A17** + overlay, rootfs
   TWRP tetap. Hasil build lokal: 62.394.368 byte (partisi 64 MiB), verifikasi
@@ -95,7 +102,61 @@ Catatan: `--wipe-metadata` menghapus kunci metadata. Semua isi `/data` hilang
 kalau kunci lama sudah tidak bisa dibuka TEE (habis ganti ROM / partisi `tee`
 ter-flash ulang).
 
-## 5. Urutan pengerjaan
+## 5. OrangeFox: “Failed to decrypt user 0”
+
+Gejala: image TWRP A17 bisa membuka `/data`, OrangeFox pada ROM yang sama
+gagal dengan pesan **`Failed to decrypt user 0`**.
+
+Penyebabnya ditemukan dengan membandingkan dua image hasil rakit lokal
+(fragmen platform + fragmen recovery, 24 + 4193 entri) berkas per berkas:
+fstab, modul, `/vendor` (keymint + gatekeeper), `recovery.fstab`, dan rc
+**identik**. Jadi bukan stack TEE-nya yang beda, melainkan wiring init dan
+jalur dekripsi milik OrangeFox:
+
+1. **gatekeeper tidak pernah jalan.** `init.recovery.mt6789.rc`
+   mendeklarasikan `service gatekeeper-1-0`, tetapi trigger-nya memakai nama
+   gaya AOSP `start vendor.gatekeeper-1-0`. Init tidak menemukan service itu
+   (`init: cannot find service 'vendor.gatekeeper-1-0'`), jadi gatekeeper mati.
+   Dekripsi user 0 butuh gatekeeper untuk memverifikasi PIN sebelum keymaster
+   melepas CE key; tanpa gatekeeper hasilnya tepat “Failed to decrypt user 0”,
+   sementara metadata/DE tetap terbuka sehingga `/data` kelihatan ter-mount
+   padahal isi user 0 tidak terbaca.
+2. **Service HAL `disabled` + `oneshot`.** Kalau sekali gagal start (TEE belum
+   siap, tee-supplicant telat), tidak ada yang menyalakan ulang — dekripsi ikut
+   gagal. `crypto-hal-start.sh` menyalakan tee-supplicant → keymint →
+   gatekeeper dengan retry terbatas dan menulis `/tmp/crypto-hal.log`.
+3. **Jalur “skip FBE decryption” milik OrangeFox.** Binary OrangeFox memuat
+   variabel simpanan `of_skip_fbe_decryption` (tidak ada di binary TWRP); kalau
+   nilainya 1, OrangeFox berhenti sebelum mencoba dekripsi. Fragmen init
+   memaksa nilainya 0 saat `on fs`.
+
+Yang berubah:
+
+| Berkas | Isi |
+| --- | --- |
+| `a17/init.append.rc` | `start gatekeeper-1-0` (nama benar), service `crypto-hal-start`, `setprop of_skip_fbe_decryption 0` |
+| `a17/root/system/bin/crypto-hal-start.sh` | baru — retry tee-supplicant/keymint/gatekeeper |
+| `a17/root/system/bin/crypto-diag.sh` | bagian “hal services”, “user 0 keys”, “kesimpulan” |
+| `tools/verify_crypto_rc.py` | baru — gagalkan build kalau ada `start` ke service yang tidak dideklarasikan, CRLF/TAB, atau fragmen hilang |
+| `tools/repack_vendor_boot.py` | fragmen lama **diganti** (bukan dilewati) saat rakit ulang |
+
+Cara pakai:
+
+1. Flash image A17 (workflow TWRP/OrangeFox, atau `tools/rebuild_a17.sh`).
+2. Boot recovery, masukkan PIN. Kalau masih gagal, dari adb:
+   ```
+   adb shell sh /system/bin/crypto-hal-start.sh
+   adb shell sh /system/bin/crypto-diag.sh
+   adb pull /tmp/crypto-hal.log
+   adb pull /tmp/crypto-diag.log
+   ```
+   Bagian `hal services` dan `kesimpulan` langsung menunjukkan apakah
+   gatekeeper atau keymint yang mati.
+3. Kalau keduanya JALAN tetapi tetap gagal, sisanya adalah stack TEE A14 vs
+   TEE A17 (bagian 2 poin 2): lengkapi lewat `tools/pull_a17_stack.sh`, lalu
+   build ulang.
+
+## 6. Urutan pengerjaan
 
 1. Build/flash image A17 (workflow TWRP/OrangeFox, atau
    `tools/repack_vendor_boot.py` untuk build lokal).
@@ -116,10 +177,11 @@ ter-flash ulang).
    e2fsck -f /dev/block/by-name/metadata
    ```
 
-## 6. Batasan
+## 7. Batasan
 
-- Semua perubahan di atas belum diuji di perangkat (tidak ada akses HP dari
-  sisi build). Yang bisa dipastikan di sini: struktur image valid, fstab dan
-  modul berasal dari ROM A17, dan diagnostik akan menunjukkan titik gagal
-  yang sebenarnya.
+- TWRP A17 sudah diuji di perangkat: dekripsi `/data` berhasil. Perbaikan
+  OrangeFox di bagian 5 diverifikasi dari sisi image (wiring init, isi
+  ramdisk, `tools/verify_crypto_rc.py`) dan sudah dirakit ulang, tetapi
+  pembuktian terakhir tetap harus dari HP: `adb pull /tmp/crypto-hal.log`
+  dan `/tmp/crypto-diag.log`.
 - Jangan flash ke device selain `tanzanite`.

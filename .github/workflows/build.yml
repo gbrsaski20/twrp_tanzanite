@@ -196,6 +196,7 @@ jobs:
               echo '    seclabel u:r:recovery:s0'
             } >> "$RC"
           fi
+
           echo "=== init rc tail ==="
           tail -n 12 "$RC"
 
@@ -269,9 +270,16 @@ jobs:
             } >> "$RC"
           fi
 
+          # Nama service di rc tree salah: dideklarasikan `gatekeeper-1-0`
+          # tetapi di-start sebagai `vendor.gatekeeper-1-0` (nama gaya AOSP).
+          # Init tidak menemukan service itu -> gatekeeper tidak pernah jalan ->
+          # "Failed to decrypt user 0". Perbaiki namanya di rc tree.
+          sed -i 's/start vendor\.gatekeeper-1-0/start gatekeeper-1-0/g; s/stop vendor\.gatekeeper-1-0/stop gatekeeper-1-0/g' "$RC"
+          grep -n 'gatekeeper-1-0' "$RC"
+
           # 3. daemon diagnostik kripto + formatter manual
           mkdir -p "$DT/recovery/root/system/bin"
-          for s in crypto-diag.sh format-data.sh; do
+          for s in crypto-diag.sh crypto-hal-start.sh format-data.sh; do
             cp -v "a17/root/system/bin/$s" "$DT/recovery/root/system/bin/$s"
             chmod 0755 "$DT/recovery/root/system/bin/$s"
             sh -n "$DT/recovery/root/system/bin/$s"
@@ -303,6 +311,21 @@ jobs:
           grep -n 'TW_INCLUDE_FBE_METADATA_DECRYPT\|TW_USE_FSCRYPT_POLICY\|TW_FORCE_KEYMASTER_VER\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
           head -3 "$DT/recovery/root/first_stage_ramdisk/fstab.mt6789"
           grep -n 'crypto-diag\|servicemanager.ready' "$DT/recovery/root/init.recovery.mt6789.rc"
+
+      # ------------------------------------------------------------------
+      # STEP 6b: Verifikasi wiring init kripto.
+      #
+      # Menangkap bug kelas "start <service>" yang menunjuk service yang tidak
+      # pernah dideklarasikan. Contoh nyata: rc memakai `start
+      # vendor.gatekeeper-1-0` padahal service-nya bernama `gatekeeper-1-0`,
+      # jadi gatekeeper tidak pernah jalan dan dekripsi user 0 selalu gagal
+      # ("Failed to decrypt user 0") walaupun keymint sehat.
+      # ------------------------------------------------------------------
+      - name: Verify crypto init wiring
+        run: |
+          python3 tools/verify_crypto_rc.py \
+            --rc twrp-build/device/xiaomi/tanzanite/recovery/root/init.recovery.mt6789.rc \
+            --root twrp-build/device/xiaomi/tanzanite/recovery/root
 
       # ------------------------------------------------------------------
       # STEP 7: Setup build environment

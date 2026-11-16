@@ -258,6 +258,7 @@ jobs:
             } >> "$RC"
           fi
 
+
           if grep -q '^TW_CUSTOM_BATTERY_PATH' "$DT/BoardConfig.mk"; then
             echo "battery path already set."
           else
@@ -352,8 +353,15 @@ jobs:
             } >> "$RC"
           fi
 
+          # Nama service di rc tree salah: dideklarasikan `gatekeeper-1-0`
+          # tetapi di-start sebagai `vendor.gatekeeper-1-0` (nama gaya AOSP).
+          # Init tidak menemukan service itu -> gatekeeper tidak pernah jalan ->
+          # "Failed to decrypt user 0". Perbaiki namanya di rc tree.
+          sed -i 's/start vendor\.gatekeeper-1-0/start gatekeeper-1-0/g; s/stop vendor\.gatekeeper-1-0/stop gatekeeper-1-0/g' "$RC"
+          grep -n 'gatekeeper-1-0' "$RC"
+
           mkdir -p "$DT/recovery/root/system/bin"
-          for s in crypto-diag.sh format-data.sh; do
+          for s in crypto-diag.sh crypto-hal-start.sh format-data.sh; do
             cp -v "a17/root/system/bin/$s" "$DT/recovery/root/system/bin/$s"
             chmod 0755 "$DT/recovery/root/system/bin/$s"
             sh -n "$DT/recovery/root/system/bin/$s"
@@ -380,6 +388,21 @@ jobs:
           grep -n 'TW_INCLUDE_FBE_METADATA_DECRYPT\|TW_USE_FSCRYPT_POLICY\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
           grep -n 'crypto-diag\|servicemanager.ready\|battfix\|flashlight' "$RC"
           ls -l "$DT/recovery/root/system/bin/crypto-diag.sh" "$DT/recovery/root/system/bin/format-data.sh"
+
+      # ------------------------------------------------------------------
+      # STEP 5.45: Verifikasi wiring init kripto.
+      #
+      # Menangkap bug kelas "start <service>" yang menunjuk service yang tidak
+      # pernah dideklarasikan. Contoh nyata: rc memakai `start
+      # vendor.gatekeeper-1-0` padahal service-nya bernama `gatekeeper-1-0`,
+      # jadi gatekeeper tidak pernah jalan dan dekripsi user 0 selalu gagal
+      # ("Failed to decrypt user 0") walaupun keymint sehat.
+      # ------------------------------------------------------------------
+      - name: Verify crypto init wiring
+        run: |
+          python3 tools/verify_crypto_rc.py \
+            --rc fox/device/xiaomi/tanzanite/recovery/root/init.recovery.mt6789.rc \
+            --root fox/device/xiaomi/tanzanite/recovery/root
 
       # ------------------------------------------------------------------
       # STEP 5.5: Disk space gate.

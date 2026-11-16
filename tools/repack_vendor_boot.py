@@ -52,7 +52,8 @@ def index(entries):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-a17", required=True, help="vendor_boot A17 (Halcyon)")
-    ap.add_argument("--twrp", required=True, help="vendor_boot TWRP yang sekarang")
+    ap.add_argument("--twrp", "--recovery", dest="twrp", required=True,
+                    help="image recovery yang sekarang (TWRP atau OrangeFox)")
     ap.add_argument("--overlay", required=True, help="folder overlay (a17/root)")
     ap.add_argument("--fstab", required=True, help="fstab.mt6789 dari A17")
     ap.add_argument("--init-append", default="",
@@ -141,19 +142,38 @@ def main():
     print("overlay    : %d file" % overlay_files)
 
     # --- 3b. fragmen init (append, BUKAN timpa) ---------------------------
+    # Kalau image masukan sudah pernah dipatch, blok lama DIGANTI dengan isi
+    # a17/init.append.rc yang sekarang. Tanpa ini, merakit ulang di atas image
+    # yang sudah dipatch akan memakai fragmen lama (perbaikan tidak pernah
+    # masuk ke image).
     rc_name = "init.recovery.mt6789.rc"
+    marker = b"# --- A17 crypto overlay (a17/init.append.rc) ---"
     if args.init_append and os.path.exists(args.init_append):
         frag = open(args.init_append, "rb").read()
         e = rec_idx.get(rc_name)
         if e is None:
             print("init rc    : tidak ada di ramdisk, fragmen dilewati")
-        elif b"A17 crypto overlay" in e["body"]:
-            print("init rc    : fragmen A17 sudah ada")
         else:
-            e["body"] = (e["body"].rstrip(b"\n")
-                         + b"\n\n# --- A17 crypto overlay (a17/init.append.rc) ---\n"
-                         + frag)
-            print("init rc    : fragmen A17 ditambahkan (%d byte)" % len(frag))
+            body = e["body"]
+            pos = body.find(marker)
+            if pos >= 0:
+                body = body[:pos].rstrip(b"\n") + b"\n"
+                state = "fragmen A17 lama diganti"
+            else:
+                body = body.rstrip(b"\n") + b"\n"
+                state = "fragmen A17 ditambahkan"
+            # Nama service di rc tree salah: dideklarasikan `gatekeeper-1-0`
+            # tetapi di-start sebagai `vendor.gatekeeper-1-0` (nama gaya AOSP),
+            # jadi gatekeeper tidak pernah jalan -> "Failed to decrypt user 0".
+            fixes = 0
+            for bad, good in ((b"start vendor.gatekeeper-1-0", b"start gatekeeper-1-0"),
+                              (b"stop vendor.gatekeeper-1-0", b"stop gatekeeper-1-0")):
+                fixes += body.count(bad)
+                body = body.replace(bad, good)
+            if fixes:
+                print("init rc    : %d nama service gatekeeper diperbaiki" % fixes)
+            e["body"] = body + b"\n" + marker + b"\n" + frag
+            print("init rc    : %s (%d byte)" % (state, len(frag)))
 
     # --- 4. rakit ulang ---------------------------------------------------
     plat_cpio = vbimg2.cpio_build(plat_entries)

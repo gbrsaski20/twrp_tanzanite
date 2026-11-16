@@ -7,11 +7,50 @@
 # battfix dan flashlight, jadi jangan ditimpa.
 # =============================================================================
 
-# AIDL keymint (servicemanager), bukan cuma HIDL hwservicemanager.
-# Tanpa ini keymint-mitee kadang tidak pernah start di A17 -> dekripsi dan
-# "Format Data" sama-sama gagal karena kunci FBE tidak bisa dibuat.
+# -----------------------------------------------------------------------------
+# "Failed to decrypt user 0" - rantai sebabnya
+#
+# /data memakai FBE v2 + PIN/password. Untuk membuka CE key user 0, recovery
+# memanggil gatekeeper (verifikasi PIN -> auth token) lalu keymaster (unwrap
+# kunci). Kalau gatekeeper tidak jalan, hasilnya persis "Failed to decrypt
+# user 0": metadata/DE tetap terbuka, jadi /data terlihat ter-mount tetapi isi
+# user 0 tidak bisa dibaca.
+#
+# rc di tree mendeklarasikan service bernama `gatekeeper-1-0`, tetapi
+# trigger-nya memakai `vendor.gatekeeper-1-0` (nama gaya AOSP). Init tidak
+# menemukan service itu, jadi gatekeeper TIDAK PERNAH start:
+#     init: cannot find service 'vendor.gatekeeper-1-0'
+# Fragmen ini memakai nama yang benar-benar terdaftar.
+# -----------------------------------------------------------------------------
+
+# keymint (AIDL) + gatekeeper (HIDL 1.0). Di A17 servicemanager siap lebih dulu
+# daripada hwservicemanager, jadi keduanya dipakai sebagai pemicu.
 on property:servicemanager.ready=true
     start keymint-mitee
+    start gatekeeper-1-0
+    start crypto-hal-start
+
+on property:hwservicemanager.ready=true
+    start gatekeeper-1-0
+    start crypto-hal-start
+
+# Pengaman: service HAL di rc bersifat `disabled` + `oneshot`. Kalau sekali
+# gagal start (TEE belum siap, tee-supplicant telat), tidak ada yang
+# menyalakannya lagi dan dekripsi ikut gagal. Script ini menyalakan ulang
+# dengan retry terbatas dan menulis /tmp/crypto-hal.log.
+service crypto-hal-start /system/bin/sh /system/bin/crypto-hal-start.sh
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+# OrangeFox punya jalur "skip FBE decryption" (variabel simpanan
+# of_skip_fbe_decryption). Kalau nilainya 1, OrangeFox berhenti sebelum
+# mencoba dekripsi dan melaporkan gagal. Dipaksa 0 saat boot supaya perilaku
+# OrangeFox sama dengan TWRP yang sudah terbukti bisa membuka /data.
+on fs
+    setprop of_skip_fbe_decryption 0
 
 # Diagnostik: tulis /tmp/crypto-diag.log setelah percobaan dekripsi.
 #   adb pull /tmp/crypto-diag.log
