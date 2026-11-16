@@ -364,7 +364,7 @@ jobs:
           grep -n 'gatekeeper-1-0' "$RC"
 
           mkdir -p "$DT/recovery/root/system/bin"
-          for s in crypto-diag.sh crypto-hal-start.sh format-data.sh; do
+          for s in crypto-diag.sh crypto-hal-start.sh format-data.sh pstore-dump.sh; do
             cp -v "a17/root/system/bin/$s" "$DT/recovery/root/system/bin/$s"
             chmod 0755 "$DT/recovery/root/system/bin/$s"
             sh -n "$DT/recovery/root/system/bin/$s"

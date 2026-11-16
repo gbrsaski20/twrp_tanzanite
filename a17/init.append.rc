@@ -63,3 +63,16 @@ service crypto-diag /system/bin/sh /system/bin/crypto-diag.sh
 
 on property:twrp.decrypt.done=true
     start crypto-diag
+
+# Log kernel dari boot yang gagal (kernel custom, panic, driver tidak load).
+# pstore/ramoops ada di RAM, jadi isinya masih bisa dibaca saat recovery
+# berikutnya boot normal -> /tmp/pstore.log
+service pstore-dump /system/bin/sh /system/bin/pstore-dump.sh
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+on boot
+    start pstore-dump

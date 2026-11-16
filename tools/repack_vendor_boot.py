@@ -129,8 +129,38 @@ def main():
     # folder modul hasil build kernel itu lewat --modules-from.
     if args.modules_from:
         src = os.path.abspath(args.modules_from)
+        if not os.path.exists(src):
+            sys.exit("--modules-from tidak ada: %s" % src)
+        tmpdir = None
+        if os.path.isfile(src) and src.lower().endswith(".zip"):
+            # zip AnyKernel3 / paket modul: ambil semua .ko di dalamnya
+            import tempfile
+            import zipfile
+            tmpdir = tempfile.mkdtemp(prefix="kmods_")
+            n = 0
+            with zipfile.ZipFile(src) as z:
+                for info in z.infolist():
+                    if not info.filename.endswith(".ko"):
+                        continue
+                    rel = info.filename
+                    for pre in ("modules/system/lib/modules/", "system/lib/modules/", "lib/modules/"):
+                        if rel.startswith(pre):
+                            rel = rel[len(pre):]
+                            break
+                    out = os.path.join(tmpdir, "lib", "modules", os.path.basename(rel))
+                    os.makedirs(os.path.dirname(out), exist_ok=True)
+                    with open(out, "wb") as w:
+                        w.write(z.read(info))
+                    n += 1
+            if n == 0:
+                sys.exit("zip %s tidak berisi .ko - kernel itu tidak menyertakan "
+                         "modul, jadi tidak bisa dipakai untuk recovery.\n"
+                         "Minta modulnya ke pembuat kernel (folder lib/modules "
+                         "hasil build kernel)." % os.path.basename(src))
+            print("modul zip  : %d .ko diambil dari %s" % (n, os.path.basename(src)))
+            src = tmpdir
         if not os.path.isdir(src):
-            sys.exit("--modules-from bukan folder: %s" % src)
+            sys.exit("--modules-from bukan folder/zip: %s" % src)
         new_mods = []
         for root, _, files in os.walk(src):
             for fn in files:

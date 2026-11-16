@@ -256,10 +256,28 @@ python3 tools/repack_vendor_boot.py --base-a17 vendor_boot_a17.img \
 (mis. `flashlight.ko`, `flashlights-mt6789-o7.ko` yang dipakai patch
 flashlight). Tanpa flag itu semua `.ko` lama dibuang.
 
-Kalau kernel custom tidak menyertakan modul sama sekali (contoh: Scalar-Abaddon,
-`do.modules=0` dan folder `modules/` kosong), **tidak ada cara** membuat
-recovery jalan dengan kernel itu — modulnya harus diminta ke pembuat kernel.
-Selama belum ada, pakai `boot.img` stok untuk masuk recovery.
+`MODULES` juga menerima **file zip**: semua `.ko` di dalamnya diambil
+otomatis (`modules/system/lib/modules/...` atau di mana pun di zip). Kalau zip
+itu tidak berisi `.ko` sama sekali, script berhenti dengan pesan jelas —
+contoh nyata: Scalar-Abaddon (`do.modules=0`, folder `modules/` kosong).
+
+Kalau kernel custom tidak menyertakan modul, **tidak ada cara** membuat
+recovery jalan dengan kernel itu — modulnya harus diminta ke pembuat kernel
+(folder `lib/modules` hasil build kernel). Selama belum ada, pakai `boot.img`
+stok untuk masuk recovery.
+
+### Kalau recovery tetap tidak mau boot: ambil log pstore
+
+Kernel stok maupun Scalar-Abaddon sama-sama punya `CONFIG_PSTORE_RAM`, jadi
+dmesg boot terakhir tetap tersimpan di RAM walau boot-nya berhenti sebelum UI.
+Image ini menjalankan `pstore-dump.sh` otomatis saat boot:
+
+1. flash kernel custom, coba boot recovery (gagal), matikan paksa;
+2. flash `boot.img` stok, boot recovery;
+3. `adb pull /tmp/pstore.log`
+
+Isinya menunjukkan penyebab sebenarnya: modul ditolak (`disagrees about
+version of symbol`, `version magic`), panic, atau berhenti di driver tertentu.
 
 Catatan: di ROM Axion dulu kernel bebas diganti karena recovery-nya dibangun
 dari source kernel yang sama, sehingga modul di vendor_boot ikut cocok.
