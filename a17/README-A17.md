@@ -48,12 +48,14 @@ Yang **tidak cocok**:
 - `a17/fstab.mt6789` → fstab first-stage **persis** dari vendor_boot A17.
 - `a17/boardconfig-a17.mk` → `TW_INCLUDE_FBE_METADATA_DECRYPT`,
   `TW_INCLUDE_CRYPTO_FBE`, `TW_USE_FSCRYPT_POLICY=2`, `TW_FORCE_KEYMASTER_VER`.
-- `a17/root/init.recovery.mt6789.rc` → keymint juga dipicu dari
-  `servicemanager.ready` (AIDL, bukan cuma `hwservicemanager`), plus service
-  `crypto-diag`.
+- `a17/init.append.rc` → fragmen init yang **di-append** (bukan menimpa rc):
+  keymint juga dipicu dari `servicemanager.ready` (AIDL, bukan cuma
+  `hwservicemanager`), plus service `crypto-diag`. Di-append supaya patch
+  battfix/flashlight di rc tidak hilang.
 - `a17/root/system/bin/crypto-diag.sh` → menulis `/tmp/crypto-diag.log`:
   properti kripto, mount, modul TEE, status service HAL, potongan
-  logcat/dmesg. Ini yang menentukan sisa masalah (kalau ada) tanpa menebak.
+  logcat/dmesg.
+- `a17/root/system/bin/format-data.sh` → format `/data` manual (lihat bagian 5).
 - `tools/repack_vendor_boot.py` → merakit `vendor_boot` recovery di atas
   basis `vendor_boot` A17: fstab A17 + **217 modul A17** + overlay, rootfs
   TWRP tetap. Hasil build lokal: 62.394.368 byte (partisi 64 MiB), verifikasi
@@ -62,10 +64,41 @@ Yang **tidak cocok**:
   `libteecli.so`, gatekeeper, dan seluruh `mitee/ta/*.ta` **dari ROM A17 di
   HP** ke `a17/prebuilt/vendor/`. Selama folder itu kosong, build masih
   memakai prebuilt A14 (poin 2 di atas belum tuntas).
+- Workflow **TWRP dan OrangeFox** sama-sama menjalankan langkah
+  “Patch device tree (A17 crypto)”. Sebelumnya hanya TWRP yang dipatch,
+  jadi build OrangeFox tetap rusak walau TWRP sudah benar.
 
-## 4. Urutan pengerjaan
+## 4. OrangeFox: “gabisa format data”
 
-1. Build/flash image A17 (workflow atau `tools/repack_vendor_boot.py`).
+“Format Data” di TWRP/OrangeFox mengerjakan **dua** hal: membuat ulang
+filesystem `/data`, lalu minta `keystore2` → keymint/TEE membuat kunci FBE
+baru. Kalau keymint gagal (stack TEE lama vs TEE A17), langkah kedua gagal dan
+UI melaporkan “Unable to format data” — padahal `make_f2fs` sendiri bisa jadi
+sukses.
+
+Urutan yang benar saat ini:
+
+1. Flash image A17 (TWRP atau OrangeFox dari workflow yang sudah dipatch).
+2. Kalau tombol Format Data masih gagal, format manual dari terminal/adb:
+   ```
+   sh /system/bin/format-data.sh                  # /data saja
+   sh /system/bin/format-data.sh --wipe-metadata  # + buang kunci metadata
+   ```
+   Script ini mencetak rc tiap langkah dan menulis `/tmp/format-data.log`,
+   jadi kelihatan apakah yang gagal filesystem atau kuncinya.
+3. Reboot ke recovery → coba `Mount /data`.
+4. Kalau mount masih gagal → ambil `/tmp/crypto-diag.log` (bagian 4) dan
+   lengkapi stack TEE A17 lewat `tools/pull_a17_stack.sh`.
+
+Catatan: `--wipe-metadata` menghapus kunci metadata. Semua isi `/data` hilang
+(memang tujuannya), dan ROM akan membuat kunci baru saat boot pertama. Pakai
+kalau kunci lama sudah tidak bisa dibuka TEE (habis ganti ROM / partisi `tee`
+ter-flash ulang).
+
+## 5. Urutan pengerjaan
+
+1. Build/flash image A17 (workflow TWRP/OrangeFox, atau
+   `tools/repack_vendor_boot.py` untuk build lokal).
 2. Boot ke recovery, coba buka `/data`, lalu:
    ```
    adb pull /tmp/crypto-diag.log
@@ -75,13 +108,15 @@ Yang **tidak cocok**:
    ./tools/pull_a17_stack.sh          # HP harus di TWRP, /vendor ter-mount
    git add a17/prebuilt && git commit -m "a17: TEE stack dari ROM A17" && git push
    ```
-   lalu build ulang — langkah "A17 crypto overlay" di workflow otomatis
+   lalu build ulang — langkah "A17 crypto overlay" di kedua workflow otomatis
    memakai stack baru itu.
-4. Kalau log menunjukkan `Unable to mount /metadata`, yang perlu dicek adalah
-   `checkpoint=fs` pada `/data` (fs corrupt/checkpoint aktif) — jalankan
-   `e2fsck -f /dev/block/by-name/metadata` dari TWRP.
+4. Kalau log menunjukkan `/metadata` gagal di-mount, cek `checkpoint=fs` pada
+   `/data` (fs kotor/checkpoint aktif) dan jalankan dari TWRP:
+   ```
+   e2fsck -f /dev/block/by-name/metadata
+   ```
 
-## 5. Batasan
+## 6. Batasan
 
 - Semua perubahan di atas belum diuji di perangkat (tidak ada akses HP dari
   sisi build). Yang bisa dipastikan di sini: struktur image valid, fstab dan

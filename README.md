@@ -47,12 +47,21 @@ Patch A17 di repo ini:
 | --- | --- |
 | `a17/fstab.mt6789` | fstab first-stage persis dari `vendor_boot` A17 |
 | `a17/boardconfig-a17.mk` | flag kripto: `TW_INCLUDE_FBE_METADATA_DECRYPT`, `TW_USE_FSCRYPT_POLICY=2`, dst. |
-| `a17/root/init.recovery.mt6789.rc` | keymint dipicu dari `servicemanager.ready`, plus `crypto-diag` |
+| `a17/init.append.rc` | fragmen init (di-append): keymint dari `servicemanager.ready` + `crypto-diag` |
 | `a17/root/system/bin/crypto-diag.sh` | tulis `/tmp/crypto-diag.log` untuk diagnosis |
+| `a17/root/system/bin/format-data.sh` | format `/data` manual (`--wipe-metadata` opsional) |
 | `tools/repack_vendor_boot.py` | rakit `vendor_boot` recovery di atas basis A17 (fstab + 217 modul A17) |
 | `tools/pull_a17_stack.sh` | tarik stack TEE/keymint dari ROM A17 di HP ke `a17/prebuilt/vendor/` |
 
-Workflow TWRP menjalankan langkah **Patch device tree (A17 crypto)** otomatis.
+Workflow **TWRP** dan **OrangeFox** sama-sama menjalankan langkah
+**Patch device tree (A17 crypto)**. Kalau tombol *Format Data* di OrangeFox
+gagal, lihat bagian 4 di dokumen analisis — format manualnya:
+
+```
+sh /system/bin/format-data.sh                  # /data saja
+sh /system/bin/format-data.sh --wipe-metadata  # + buang kunci metadata
+```
+
 Analisis lengkap, urutan pengerjaan, dan batasannya ada di
 **[a17/README-A17.md](a17/README-A17.md)**.
 

@@ -1,0 +1,26 @@
+# =============================================================================
+# Fragmen init tambahan untuk ROM Android 17 (Halcyon 17.0)
+#
+# Di-append ke device/xiaomi/tanzanite/recovery/root/init.recovery.mt6789.rc
+# oleh workflow (TWRP & OrangeFox) dan oleh tools/repack_vendor_boot.py.
+# Sengaja berupa fragmen, BUKAN file utuh: rc di tree sudah dipatch untuk
+# battfix dan flashlight, jadi jangan ditimpa.
+# =============================================================================
+
+# AIDL keymint (servicemanager), bukan cuma HIDL hwservicemanager.
+# Tanpa ini keymint-mitee kadang tidak pernah start di A17 -> dekripsi dan
+# "Format Data" sama-sama gagal karena kunci FBE tidak bisa dibuat.
+on property:servicemanager.ready=true
+    start keymint-mitee
+
+# Diagnostik: tulis /tmp/crypto-diag.log setelah percobaan dekripsi.
+#   adb pull /tmp/crypto-diag.log
+service crypto-diag /system/bin/sh /system/bin/crypto-diag.sh
+    user root
+    group root
+    oneshot
+    disabled
+    seclabel u:r:recovery:s0
+
+on property:twrp.decrypt.done=true
+    start crypto-diag

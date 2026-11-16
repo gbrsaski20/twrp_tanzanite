@@ -47,6 +47,7 @@ on:
       - '.github/workflows/build-orangefox.yml'
       - 'flashlight/**'
       - 'orangefox/**'
+      - 'a17/**'
 
 env:
   FOX_SYNC_BRANCH: ${{ github.event.inputs.fox_branch || '12.1' }}
@@ -321,6 +322,64 @@ jobs:
           grep -n 'TW_LOAD_VENDOR_MODULES' "$DT/device.mk"
           grep -n 'tanzanite-flashlightd' "$RC"
           ls -lh "$MODDIR/flashlight.ko" "$MODDIR/flashlights-mt6789-o7.ko"
+
+      # ------------------------------------------------------------------
+      # STEP 5.4: Patch device tree - Android 17 (Halcyon) crypto support.
+      #
+      # Tanpa ini OrangeFox TIDAK bisa format /data maupun dekripsi di ROM
+      # Android 17: fstab first-stage masih era Android 14 (ada fscompress,
+      # tanpa fsverity) sehingga /metadata tidak terbuka, dan "Format Data"
+      # gagal saat membuat kunci FBE baru lewat keymint.
+      #
+      # Dijalankan SETELAH patch battery/flashlight supaya fragmen init yang
+      # di-append tidak hilang (kita append, bukan menimpa rc).
+      # ------------------------------------------------------------------
+      - name: Patch device tree (A17 crypto)
+        run: |
+          set -e
+          DT=fox/device/xiaomi/tanzanite
+
+          cp -v a17/fstab.mt6789 "$DT/recovery/root/first_stage_ramdisk/fstab.mt6789"
+
+          RC="$DT/recovery/root/init.recovery.mt6789.rc"
+          if grep -q 'A17 crypto overlay' "$RC"; then
+            echo "fragmen init A17 sudah ada."
+          else
+            {
+              echo ''
+              echo '# --- A17 crypto overlay (a17/init.append.rc) ---'
+              cat a17/init.append.rc
+            } >> "$RC"
+          fi
+
+          mkdir -p "$DT/recovery/root/system/bin"
+          for s in crypto-diag.sh format-data.sh; do
+            cp -v "a17/root/system/bin/$s" "$DT/recovery/root/system/bin/$s"
+            chmod 0755 "$DT/recovery/root/system/bin/$s"
+            sh -n "$DT/recovery/root/system/bin/$s"
+            echo "$s syntax: OK"
+          done
+
+          if grep -q 'A17 crypto' "$DT/BoardConfig.mk"; then
+            echo "flag A17 sudah ada."
+          else
+            printf '\n# --- A17 crypto (lihat a17/boardconfig-a17.mk) ---\n' >> "$DT/BoardConfig.mk"
+            cat a17/boardconfig-a17.mk >> "$DT/BoardConfig.mk"
+          fi
+
+          if [ -d a17/prebuilt/vendor ] && [ -n "$(ls -A a17/prebuilt/vendor 2>/dev/null)" ]; then
+            echo "=== memakai stack TEE/keymint dari ROM A17 ==="
+            cp -rv a17/prebuilt/vendor/. "$DT/recovery/root/vendor/"
+          else
+            echo "catatan: a17/prebuilt/vendor kosong - masih memakai prebuilt A14."
+          fi
+
+          sed -i 's/^TW_DEVICE_VERSION := .*/TW_DEVICE_VERSION := -A17_Tanzanite_gbrsaski20/' "$DT/BoardConfig.mk"
+
+          echo "=== verifikasi ==="
+          grep -n 'TW_INCLUDE_FBE_METADATA_DECRYPT\|TW_USE_FSCRYPT_POLICY\|TW_DEVICE_VERSION' "$DT/BoardConfig.mk"
+          grep -n 'crypto-diag\|servicemanager.ready\|battfix\|flashlight' "$RC"
+          ls -l "$DT/recovery/root/system/bin/crypto-diag.sh" "$DT/recovery/root/system/bin/format-data.sh"
 
       # ------------------------------------------------------------------
       # STEP 5.5: Disk space gate.

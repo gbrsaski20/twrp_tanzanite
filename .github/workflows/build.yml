@@ -255,15 +255,28 @@ jobs:
           # 1. fstab A17 (metadata encryption + FBE v2, persis dari vendor_boot A17)
           cp -v a17/fstab.mt6789 "$DT/recovery/root/first_stage_ramdisk/fstab.mt6789"
 
-          # 2. init recovery: trigger keymint via servicemanager + daemon diagnostik
-          cp -v a17/root/init.recovery.mt6789.rc "$DT/recovery/root/init.recovery.mt6789.rc"
+          # 2. init recovery: TAMBAH trigger keymint (AIDL) + service diagnostik.
+          #    Sengaja append, bukan timpa: rc di tree sudah dipatch untuk
+          #    battfix dan flashlight.
+          RC="$DT/recovery/root/init.recovery.mt6789.rc"
+          if grep -q 'A17 crypto overlay' "$RC"; then
+            echo "fragmen init A17 sudah ada."
+          else
+            {
+              echo ''
+              echo '# --- A17 crypto overlay (a17/init.append.rc) ---'
+              cat a17/init.append.rc
+            } >> "$RC"
+          fi
 
-          # 3. daemon diagnostik kripto (/tmp/crypto-diag.log, pull lewat adb)
+          # 3. daemon diagnostik kripto + formatter manual
           mkdir -p "$DT/recovery/root/system/bin"
-          cp -v a17/root/system/bin/crypto-diag.sh "$DT/recovery/root/system/bin/crypto-diag.sh"
-          chmod 0755 "$DT/recovery/root/system/bin/crypto-diag.sh"
-          sh -n "$DT/recovery/root/system/bin/crypto-diag.sh"
-          echo "crypto-diag.sh syntax: OK"
+          for s in crypto-diag.sh format-data.sh; do
+            cp -v "a17/root/system/bin/$s" "$DT/recovery/root/system/bin/$s"
+            chmod 0755 "$DT/recovery/root/system/bin/$s"
+            sh -n "$DT/recovery/root/system/bin/$s"
+            echo "$s syntax: OK"
+          done
 
           # 4. flag BoardConfig khusus A17
           if grep -q 'A17 crypto' "$DT/BoardConfig.mk"; then

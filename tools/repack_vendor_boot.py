@@ -19,6 +19,7 @@ Pemakaian:
         --twrp     vendor_boot_twrp_tanzanite.img \
         --overlay  a17/root \
         --fstab    a17/fstab.mt6789 \
+        --init-append a17/init.append.rc \
         --out      vendor_boot_twrp_tanzanite_a17.img
 """
 
@@ -54,6 +55,8 @@ def main():
     ap.add_argument("--twrp", required=True, help="vendor_boot TWRP yang sekarang")
     ap.add_argument("--overlay", required=True, help="folder overlay (a17/root)")
     ap.add_argument("--fstab", required=True, help="fstab.mt6789 dari A17")
+    ap.add_argument("--init-append", default="",
+                    help="fragmen init tambahan (a17/init.append.rc)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -136,6 +139,21 @@ def main():
             overlay_files += 1
             print("  overlay: %s (%d byte)" % (rel, len(body)))
     print("overlay    : %d file" % overlay_files)
+
+    # --- 3b. fragmen init (append, BUKAN timpa) ---------------------------
+    rc_name = "init.recovery.mt6789.rc"
+    if args.init_append and os.path.exists(args.init_append):
+        frag = open(args.init_append, "rb").read()
+        e = rec_idx.get(rc_name)
+        if e is None:
+            print("init rc    : tidak ada di ramdisk, fragmen dilewati")
+        elif b"A17 crypto overlay" in e["body"]:
+            print("init rc    : fragmen A17 sudah ada")
+        else:
+            e["body"] = (e["body"].rstrip(b"\n")
+                         + b"\n\n# --- A17 crypto overlay (a17/init.append.rc) ---\n"
+                         + frag)
+            print("init rc    : fragmen A17 ditambahkan (%d byte)" % len(frag))
 
     # --- 4. rakit ulang ---------------------------------------------------
     plat_cpio = vbimg2.cpio_build(plat_entries)
