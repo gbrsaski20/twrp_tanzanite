@@ -177,7 +177,35 @@ Cara pakai:
    e2fsck -f /dev/block/by-name/metadata
    ```
 
-## 7. Batasan
+## 7. Branding halaman About (logo + nama GitHub)
+
+Dikerjakan **setelah** image jadi, bukan dari source: `tools/brand_image.py`
+membongkar fragmen recovery, mematch tema, lalu merakit ulang. Idempoten —
+aman dijalankan berkali-kali di image yang sama.
+
+| Recovery | Yang muncul |
+| --- | --- |
+| TWRP | menu **Advanced → About** (tema TWRP 12.1 tidak punya halaman ini, jadi ditambahkan): logo, `gbrsaski20`, `github.com/gbrsaski20`, versi. Plus logo di splash |
+| OrangeFox | **Settings → About**: logo besar diganti logo brand, kartu maintainer selalu tampil berisi nama + URL GitHub |
+
+Pemakaian:
+
+```
+python3 tools/brand_image.py --image vendor_boot.img            # in-place
+python3 tools/brand_image.py --image in.img --out out.img        # ke file lain
+python3 tools/brand_image.py --image in.img --name namamu --url github.com/namamu
+python3 tools/brand_image.py --image in.img --no-splash          # tanpa ganti splash TWRP
+```
+
+Aset di `branding/`: `logo.png` (560 px), `logo_mid.png` (420 px, untuk About
+TWRP + splash), `logo_about.png` (200 px, untuk About OrangeFox). Ketiganya
+diturunkan dari `logo.jpeg` (latar hitam dibuat transparan). Ganti berkas itu
+kalau mau logo lain — tidak perlu ubah script.
+
+Kedua workflow menjalankan step **Brand About page** (`BRAND_NAME` /
+`BRAND_URL` di blok `env`), jadi image hasil CI otomatis sudah ber-branding.
+
+## 8. Batasan
 
 - TWRP A17 sudah diuji di perangkat: dekripsi `/data` berhasil. Perbaikan
   OrangeFox di bagian 5 diverifikasi dari sisi image (wiring init, isi

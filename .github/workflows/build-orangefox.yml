@@ -55,6 +55,9 @@ env:
   FOX_BUILD_DEVICE: "tanzanite"
   # Keep the recovery-side gauge correction enabled for manual and push builds.
   BATTERY_FIX: ${{ github.event.inputs.battery_fix || 'on' }}
+  # Branding halaman About (tools/brand_image.py)
+  BRAND_NAME: "gbrsaski20"
+  BRAND_URL: "github.com/gbrsaski20"
   IMG_NAME: ${{ (github.event.inputs.battery_fix || 'on') == 'on' && 'vendor_boot_orangefox_tanzanite_gbrsaski20.img' || 'vendor_boot_orangefox_tanzanite_stockbatt.img' }}
 
 # GITHUB_TOKEN is read-only by default on repos created after Feb 2023.
@@ -590,6 +593,20 @@ jobs:
             echo "=== header (must be VNDRBOOT) ==="
             head -c 16 "$IMG_NAME"; echo
           fi
+
+      # ------------------------------------------------------------------
+      # STEP 7b: Branding halaman About (logo + nama GitHub).
+      #
+      # Bekerja pada image yang sudah jadi: tema di dalam ramdisk dipatch
+      # (TWRP: halaman About baru di menu Advanced + logo splash,
+      #  OrangeFox: kartu maintainer + logo di Settings -> About).
+      # ------------------------------------------------------------------
+      - name: Brand About page
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check lz4
+          python3 tools/brand_image.py \
+            --image "$IMG_NAME" \
+            --name "$BRAND_NAME" --url "$BRAND_URL"
 
       - name: Upload OrangeFox image
         uses: actions/upload-artifact@v4

@@ -39,6 +39,9 @@ env:
   MANIFEST_URL: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
   DEVICE: "tanzanite"
   TW_DEVICE_VERSION: "A14_Tanzanite"
+  # Branding halaman About (tools/brand_image.py)
+  BRAND_NAME: "gbrsaski20"
+  BRAND_URL: "github.com/gbrsaski20"
 
 jobs:
   build:
@@ -370,6 +373,20 @@ jobs:
           # Copy to a clean filename
           cp "${OUTPUT_IMG}" ../vendor_boot_twrp_tanzanite.img
           echo "output_path=../vendor_boot_twrp_tanzanite.img" >> ${GITHUB_OUTPUT}
+
+      # ------------------------------------------------------------------
+      # STEP 9b: Branding halaman About (logo + nama GitHub).
+      #
+      # Bekerja pada image yang sudah jadi: tema di dalam ramdisk dipatch
+      # (TWRP: halaman About baru di menu Advanced + logo splash,
+      #  OrangeFox: kartu maintainer + logo di Settings -> About).
+      # ------------------------------------------------------------------
+      - name: Brand About page
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check lz4
+          python3 tools/brand_image.py \
+            --image vendor_boot_twrp_tanzanite.img \
+            --name "$BRAND_NAME" --url "$BRAND_URL"
 
       # ------------------------------------------------------------------
       # STEP 10: Upload artifact
