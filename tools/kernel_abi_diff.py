@@ -28,6 +28,14 @@ ABI_KEYS = (
     "LOCALVERSION", "KSU",
 )
 
+# Beda di opsi ini mengubah layout struct / daftar simbol -> CRC modul berubah.
+FATAL = ("LTO_CLANG_FULL", "CFI_FORCE_SKIP_CHECK", "TRIM_UNUSED_KSYMS",
+         "MODVERSIONS", "STACKPROTECTOR_PER_TASK", "RANDSTRUCT", "MODULE_SIG",
+         "MODULE_FORCE", "KSU")
+
+# Beda di opsi ini tidak mengubah CRC: cuma string versi / path whitelist.
+INFO = ("LOCALVERSION", "UNUSED_KSYMS_WHITELIST", "CLANG_VERSION", "GCC_VERSION")
+
 PAT = re.compile(r"CONFIG_(%s)[A-Z0-9_]*\b.*" % "|".join(ABI_KEYS))
 
 
@@ -102,18 +110,26 @@ def main():
         print("ABI: tidak ada opsi ABI yang beda -> modul stok seharusnya diterima.")
         return 0
 
-    print("ABI: %d opsi berbeda. Yang paling sering memutus modul vendor:" % len(rows))
-    hits = [k for k, _, _ in rows if any(x in k for x in
-            ("LTO_CLANG_FULL", "CFI_FORCE_SKIP_CHECK", "CLANG_VERSION",
-             "TRIM_UNUSED_KSYMS", "UNUSED_KSYMS_WHITELIST"))]
-    for k in hits:
-        print("  - %s" % k)
-    if hits:
-        print("\nKesimpulan: build ini kemungkinan TIDAK KMI-compliant, jadi modul")
-        print("vendor (lib/modules di vendor_boot) akan ditolak kernel-nya.")
-        print("Minta pembuat kernel menyamakan opsi di atas dengan kernel stok")
-        print("(LTO thin, tanpa CFI_FORCE_SKIP_CHECK, clang sama, TRIM_UNUSED_KSYMS")
-        print("+ whitelist sama), atau minta folder lib/modules hasil build-nya.")
+    fatal = [k for k, _, _ in rows if any(x in k for x in FATAL)]
+    info = [k for k, _, _ in rows if k not in fatal and any(x in k for x in INFO)]
+    other = [k for k, _, _ in rows if k not in fatal and k not in info]
+
+    if fatal:
+        print("ABI: TIDAK KMI-compliant. %d opsi yang mengubah CRC/layout:" % len(fatal))
+        for k in fatal:
+            print("  - %s" % k)
+        print("\nKesimpulan: modul vendor (lib/modules di vendor_boot) akan DITOLAK")
+        print("kernel ini. Minta pembuat kernel menyamakan opsi di atas dengan kernel")
+        print("stok (LTO thin, tanpa CFI_FORCE_SKIP_CHECK, TRIM_UNUSED_KSYMS +")
+        print("whitelist sama), atau minta folder lib/modules hasil build-nya.")
+        return 0
+
+    print("ABI: tidak ada opsi yang mengubah CRC. Modul stok seharusnya tetap")
+    print("diterima walau versi kernel berbeda.")
+    if info:
+        print("Beda yang aman (cuma string/path): %s" % ", ".join(info))
+    if other:
+        print("Beda lain yang perlu dilihat: %s" % ", ".join(other[:8]))
     return 0
 
 
