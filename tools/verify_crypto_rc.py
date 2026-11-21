@@ -46,6 +46,35 @@ def hal_service(name):
     return name.startswith(HAL_OK_PREFIX) or "-hal-" in name
 
 
+def _lev(a, b):
+    """Jarak edit sederhana (nama service pendek, jadi aman)."""
+    if a == b:
+        return 0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1,
+                           prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def typo_of(name, declared):
+    """Kalau `name` kelihatan salah tulis dari service yang benar-benar ada."""
+    for pre in ("vendor.", "vendor_", "hal."):
+        if name.startswith(pre) and name[len(pre):] in declared:
+            return name[len(pre):]
+    best = None
+    for d in declared:
+        if abs(len(d) - len(name)) > 2:
+            continue
+        dist = _lev(name, d)
+        if dist <= 1 and (best is None or dist < best[1]):
+            best = (d, dist)
+    return best[0] if best else None
+
+
 def looks_like_ramdisk(root):
     """True kalau root sudah berupa ramdisk hasil build, bukan device tree."""
     if not root or not os.path.isdir(root):
@@ -113,14 +142,24 @@ def main():
 
     # 1. start/stop harus ada targetnya
     ramdisk = looks_like_ramdisk(args.root)
+    known = set(services) | BUILTIN
     for name, no in starts:
-        if name in services or name in BUILTIN:
+        if name in known:
             continue
-        # Di device tree, rc HAL AOSP (system/etc/init/*.rc) belum ada.
-        if not ramdisk and hal_service(name):
+        typo = typo_of(name, known)
+        if typo:
+            problems.append("%s:%d: start/stop '%s' - tidak dideklarasikan, "
+                            "mirip '%s' (kemungkinan salah nama)"
+                            % (args.rc, no, name, typo))
+        elif ramdisk:
+            # di ramdisk semua rc sudah ada, jadi nama asing = salah
+            problems.append("%s:%d: start/stop '%s' - service itu tidak "
+                            "dideklarasikan" % (args.rc, no, name))
+        elif hal_service(name):
+            # device tree: rc HAL AOSP (system/etc/init) baru ada setelah build
             continue
-        problems.append("%s:%d: start/stop '%s' - service itu tidak dideklarasikan"
-                        % (args.rc, no, name))
+        # device tree: service dari rc lain (vendor/etc/init, init.mitee.rc)
+        # tidak bisa diverifikasi di sini -> dilewati
 
     # 2. binary service harus ada - hanya bisa diperiksa di ramdisk hasil build,
     #    karena /system/bin/sh dll disalin build, bukan bagian device tree.
