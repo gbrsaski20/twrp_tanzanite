@@ -140,6 +140,19 @@ Yang berubah:
 | `tools/verify_crypto_rc.py` | baru — gagalkan build kalau ada `start` ke service yang tidak dideklarasikan, CRLF/TAB, atau fragmen hilang |
 | `tools/repack_vendor_boot.py` | fragmen lama **diganti** (bukan dilewati) saat rakit ulang |
 
+`verify_crypto_rc.py` dipakai di CI pada **device tree**, sebelum build. Di
+titik itu `system/etc/init/*.rc` (boot-hal, health-hal, dst) dan binary seperti
+`/system/bin/sh` belum ada - semuanya disalin build. Jadi script mendeteksi
+mode-nya sendiri:
+
+| `--root` | Mode | Yang diperiksa |
+| --- | --- | --- |
+| device tree (tanpa `init`/`twres`) | longgar | nama service + CRLF/TAB + fragmen; cek binary dilewati, service HAL AOSP dianggap sah |
+| ramdisk hasil build | ketat | semua di atas **plus** binary tiap service harus ada |
+
+Bug gatekeeper tetap tertangkap di kedua mode, karena yang diperiksa adalah
+service `gatekeeper-1-0` yang dideklarasikan di rc tree sendiri.
+
 Cara pakai:
 
 1. Flash image A17 (workflow TWRP/OrangeFox, atau `tools/rebuild_a17.sh`).

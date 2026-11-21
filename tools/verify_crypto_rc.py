@@ -34,6 +34,26 @@ BUILTIN = {
 }
 
 
+# Service HAL yang rc-nya baru ada SETELAH build (disalin dari AOSP ke
+# /system/etc/init di ramdisk), jadi tidak terlihat saat memeriksa device tree.
+# Catatan: gatekeeper sengaja TIDAK masuk sini - nama service-nya dideklarasikan
+# sendiri di rc tree, dan salah nama di situ justru bug yang mau ditangkap.
+HAL_OK_PREFIX = ("boot-hal", "health-hal", "keymaster", "keymint",
+                 "vendor.apexd", "vendor.keymaster")
+
+
+def hal_service(name):
+    return name.startswith(HAL_OK_PREFIX) or "-hal-" in name
+
+
+def looks_like_ramdisk(root):
+    """True kalau root sudah berupa ramdisk hasil build, bukan device tree."""
+    if not root or not os.path.isdir(root):
+        return False
+    return (os.path.exists(os.path.join(root, "init"))
+            or os.path.isdir(os.path.join(root, "twres")))
+
+
 def read_rc(path):
     with open(path, "rb") as fh:
         raw = fh.read()
@@ -92,15 +112,20 @@ def main():
             services.setdefault(k, v)
 
     # 1. start/stop harus ada targetnya
+    ramdisk = looks_like_ramdisk(args.root)
     for name, no in starts:
         if name in services or name in BUILTIN:
+            continue
+        # Di device tree, rc HAL AOSP (system/etc/init/*.rc) belum ada.
+        if not ramdisk and hal_service(name):
             continue
         problems.append("%s:%d: start/stop '%s' - service itu tidak dideklarasikan"
                         % (args.rc, no, name))
 
-    # 2. binary service harus ada
+    # 2. binary service harus ada - hanya bisa diperiksa di ramdisk hasil build,
+    #    karena /system/bin/sh dll disalin build, bukan bagian device tree.
     skip_bin = {"charger"}  # symlink di root ramdisk, bukan bagian patch ini
-    if args.root:
+    if ramdisk:
         for name, path in sorted(services.items()):
             if not path.startswith("/") or name in skip_bin:
                 continue
@@ -125,8 +150,9 @@ def main():
             print("  - %s" % p)
         return 1
 
-    print("VERIFIKASI OK: %d service, %d start/stop, fragmen A17 ada"
-          % (len(services), len(starts)))
+    print("VERIFIKASI OK: %d service, %d start/stop, fragmen A17 ada (%s)"
+          % (len(services), len(starts),
+             "ramdisk, cek ketat" if ramdisk else "device tree, cek binary dilewati"))
     return 0
 
 
